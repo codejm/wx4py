@@ -206,6 +206,8 @@ with WeChatClient() as wx:
 
 运行后，你的微信会自动发送这条消息。
 
+如果你是开发者，想查看更多调用示例，请参考 [examples/](./examples/) 目录。
+
 ---
 
 ## AI Skill 快速使用
