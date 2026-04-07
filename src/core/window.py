@@ -63,8 +63,9 @@ _WM_GETOBJECT = 0x003D
 _OBJID_CLIENT = 0xFFFFFFFC  # -4 的无符号表示
 
 # 唤醒尝试次数和每次等待时间（秒）
-_WAKE_ATTEMPTS = 3
-_WAKE_INTERVAL = 3
+# 增加尝试次数和等待时间以提高唤醒成功率
+_WAKE_ATTEMPTS = 5
+_WAKE_INTERVAL = 4
 
 
 def _force_broadcast_screen_reader_flag():
@@ -132,11 +133,18 @@ class WeChatWindow:
         logger.info("尝试唤醒微信 UIA 辅助功能（不重启微信）...")
 
         for attempt in range(1, _WAKE_ATTEMPTS + 1):
-            # 强制广播 SPI 变更通知
+            # 步骤1：尝试激活窗口以触发辅助功功能初始化
+            try:
+                bring_window_to_front(self._hwnd)
+                time.sleep(0.3)
+            except Exception:
+                pass
+
+            # 步骤2：强制广播 SPI 变更通知
             _force_broadcast_screen_reader_flag()
             time.sleep(0.5)
 
-            # 发送 WM_GETOBJECT 触发 Qt 延迟初始化
+            # 步骤3：发送 WM_GETOBJECT 触发 Qt 延迟初始化
             _send_wm_getobject(self._hwnd)
             time.sleep(_WAKE_INTERVAL)
 
