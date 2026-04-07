@@ -42,8 +42,9 @@ GROUP_CHATS = '群聊'
 GROUP_FUNCTIONS = '功能'
 GROUP_NETWORK = '搜索网络结果'
 GROUP_HISTORY = '聊天记录'
+GROUP_FREQUENT = '最常使用'
 
-ALL_GROUP_NAMES = [GROUP_CONTACTS, GROUP_CHATS, GROUP_FUNCTIONS, GROUP_NETWORK, GROUP_HISTORY]
+ALL_GROUP_NAMES = [GROUP_CONTACTS, GROUP_CHATS, GROUP_FUNCTIONS, GROUP_NETWORK, GROUP_HISTORY, GROUP_FREQUENT]
 
 
 @dataclass
@@ -215,6 +216,11 @@ class ChatWindow(BasePage):
         primary_group = GROUP_CHATS if target_type == 'group' else GROUP_CONTACTS
 
         for item in results.get(primary_group, []):
+            if target in item.name:
+                return item
+
+        # 查找"最常使用"分组中匹配的目标
+        for item in results.get(GROUP_FREQUENT, []):
             if target in item.name:
                 return item
 
