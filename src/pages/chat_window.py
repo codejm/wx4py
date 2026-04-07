@@ -232,12 +232,31 @@ class ChatWindow(BasePage):
             logger.error("Chat input not found")
             return None
 
-        chat_input.Click()
-        time.sleep(OPERATION_INTERVAL)
-        chat_input.SendKeys('{Ctrl}a')
-        chat_input.SendKeys('{Delete}')
-        time.sleep(OPERATION_INTERVAL)
-        return chat_input
+        try:
+            # Try to focus the input
+            try:
+                chat_input.Click(simulateMove=False)
+            except Exception:
+                try:
+                    chat_input.SetFocus()
+                except Exception:
+                    pass
+
+            time.sleep(0.2)
+
+            # Clear existing content
+            try:
+                chat_input.SendKeys('{Ctrl}a')
+                time.sleep(0.1)
+                chat_input.SendKeys('{Delete}')
+                time.sleep(0.1)
+            except Exception as e:
+                logger.debug(f"Failed to clear chat input: {e}")
+
+            return chat_input
+        except Exception as e:
+            logger.error(f"Failed to prepare chat input: {e}")
+            return None
 
     def _paste_text_into_chat_input(self, text: str, log_error: str = "Failed to write message to clipboard") -> bool:
         """Paste text into the currently focused chat input via clipboard."""
@@ -348,55 +367,94 @@ class ChatWindow(BasePage):
     def _get_search_edit(self, retries: int = SEARCH_RETRY_COUNT):
         """Get main search box control (not the one in group detail panel)."""
 
-        def find_edits(ctrl, results):
+        def find_edits(ctrl, results, depth=0):
+            """Recursively find edit controls with depth limit to avoid performance issues."""
+            if depth > 5:  # Limit recursion depth to prevent performance issues
+                return
             try:
+                if not ctrl:
+                    return
                 if ctrl.ControlTypeName == 'EditControl':
+                    class_name = ctrl.ClassName or ''
+                    name = ctrl.Name or ''
                     # Different WeChat builds may use different class names for search box.
-                    if ctrl.ClassName in ('mmui::XValidatorTextEdit', 'mmui::XTextEdit') or (ctrl.Name or '').find('搜索') >= 0:
+                    # Check for common search box patterns
+                    is_search_edit = (
+                        class_name in ('mmui::XValidatorTextEdit', 'mmui::XTextEdit', 'mmui::XEditEx') or
+                        '搜索' in name or
+                        (name == '' and class_name.startswith('mmui::X'))  # Allow empty name with mmui class
+                    )
+                    if is_search_edit:
                         results.append(ctrl)
-                for child in ctrl.GetChildren():
-                    find_edits(child, results)
+                # Limit children traversal to avoid performance issues
+                children = ctrl.GetChildren()
+                if children and len(children) <= 50:  # Limit children count
+                    for child in children:
+                        find_edits(child, results, depth + 1)
             except Exception:
                 # Ignore transient UIA traversal errors
                 return
 
         for attempt in range(1, retries + 1):
             edits = []
-            find_edits(self.root, edits)
+            try:
+                find_edits(self.root, edits)
+            except Exception as e:
+                logger.debug(f"Error finding edits: {e}")
 
             for edit in edits:
                 # Some builds may not expose Name='搜索' consistently; allow blank name as fallback.
-                if edit.Name not in ('搜索', ''):
+                edit_name = edit.Name or ''
+                if edit_name not in ('搜索', '') and '搜索' not in edit_name:
                     continue
 
                 # Check if this is in group detail panel (ChatRoomMemberInfoView)
-                parent = edit.GetParentControl()
-                grandparent = parent.GetParentControl() if parent else None
+                try:
+                    parent = edit.GetParentControl()
+                    grandparent = parent.GetParentControl() if parent else None
+                    great_grandparent = grandparent.GetParentControl() if grandparent else None
 
-                if grandparent and 'ChatRoomMemberInfoView' in (grandparent.ClassName or ''):
-                    # This is "搜索群成员" in group detail panel
-                    # Close the panel first
-                    logger.debug("Group detail panel is open, closing...")
-                    edit.SendKeys('{Esc}')
-                    time.sleep(0.5)
-                    continue
-
-                # This is likely the main search box
-                if edit.Exists(maxSearchSeconds=1):
-                    return edit
+                    # Check multiple levels for group detail panel
+                    for ancestor in [grandparent, great_grandparent]:
+                        if ancestor and 'ChatRoomMemberInfoView' in (ancestor.ClassName or ''):
+                            # This is "搜索群成员" in group detail panel
+                            # Close the panel first
+                            logger.debug("Group detail panel is open, closing...")
+                            try:
+                                self.root.SendKeys('{Esc}')
+                            except Exception:
+                                pass
+                            time.sleep(0.3)
+                            break
+                    else:
+                        # This is likely the main search box - verify it exists with short timeout
+                        try:
+                            if edit.Exists(maxSearchSeconds=0.5):
+                                return edit
+                        except Exception:
+                            pass
+                except Exception:
+                    # If we can't check ancestors, try using this edit anyway
+                    try:
+                        if edit.Exists(maxSearchSeconds=0.5):
+                            return edit
+                    except Exception:
+                        pass
 
             # Recovery between attempts: try returning to main surface and refocus window
             try:
                 self.root.SendKeys('{Esc}')
-                time.sleep(0.2)
+                time.sleep(0.1)
                 self.root.SendKeys('{Esc}')
-                time.sleep(0.2)
+                time.sleep(0.1)
                 # Force-open global search in some builds where search box is lazily created
                 self.root.SendKeys('{Ctrl}f')
+                time.sleep(0.3)
             except Exception:
                 pass
+
             self._window.activate()
-            time.sleep(0.5)
+            time.sleep(0.3)
             logger.debug(f"Search box not found, retrying ({attempt}/{retries})")
 
         logger.warning("Search box not found")
@@ -404,13 +462,81 @@ class ChatWindow(BasePage):
 
     def _get_chat_input(self):
         """Get chat input field"""
-        edit = self.root.EditControl(AutomationId='chat_input_field')
-        return edit if edit.Exists(maxSearchSeconds=SEARCH_TIMEOUT) else None
+        # Try multiple methods to find chat input field for different WeChat versions
+        possible_ids = ['chat_input_field', 'input_field', 'msg_input', 'edit_input']
+        possible_class_names = ['mmui::XTextEdit', 'mmui::XValidatorTextEdit', 'mmui::XEditEx', 'mmui::XRichEdit']
+
+        # Try by AutomationId first
+        for auto_id in possible_ids:
+            try:
+                edit = self.root.EditControl(AutomationId=auto_id)
+                if edit.Exists(maxSearchSeconds=0.5):
+                    return edit
+            except Exception:
+                continue
+
+        # Try by ClassName
+        for class_name in possible_class_names:
+            try:
+                edit = self.root.EditControl(ClassName=class_name)
+                # Additional check: chat input should be in the lower part of window
+                if edit.Exists(maxSearchSeconds=0.5):
+                    rect = edit.BoundingRectangle
+                    root_rect = self.root.BoundingRectangle
+                    # Chat input is typically in bottom half of window
+                    if rect and root_rect and rect.top > (root_rect.top + root_rect.height() * 0.5):
+                        return edit
+            except Exception:
+                continue
+
+        # Last resort: find all EditControls and pick the one most likely to be chat input
+        try:
+            edits = self.root.GetChildren()
+            candidates = []
+            for ctrl in edits:
+                if ctrl.ControlTypeName == 'EditControl':
+                    rect = ctrl.BoundingRectangle
+                    root_rect = self.root.BoundingRectangle
+                    if rect and root_rect:
+                        # Prefer edits in bottom area
+                        score = rect.top - root_rect.top
+                        candidates.append((score, ctrl))
+
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                return candidates[0][1]
+        except Exception:
+            pass
+
+        return None
 
     def _get_search_popup(self):
         """Get search popup window"""
-        popup = self.root.WindowControl(ClassName='mmui::SearchContentPopover')
-        return popup if popup.Exists(maxSearchSeconds=SEARCH_TIMEOUT) else None
+        # Try multiple possible class names for search popup in different WeChat versions
+        possible_class_names = [
+            'mmui::SearchContentPopover',
+            'mmui::SearchPopover',
+            'mmui::XSearchPopup',
+            'mmui::XPopupWindow',
+        ]
+
+        for class_name in possible_class_names:
+            try:
+                popup = self.root.WindowControl(ClassName=class_name)
+                if popup.Exists(maxSearchSeconds=0.5):
+                    return popup
+            except Exception:
+                continue
+
+        # Fallback: try to find by AutomationId or other properties
+        try:
+            popup = self.root.WindowControl(AutomationId='search_popup')
+            if popup.Exists(maxSearchSeconds=0.5):
+                return popup
+        except Exception:
+            pass
+
+        return None
 
     def _parse_search_results(self, items) -> Dict[str, List[SearchResult]]:
         """
@@ -497,14 +623,35 @@ class ChatWindow(BasePage):
             logger.error("Search box not found")
             return False
 
-        search_edit.Click()
-        time.sleep(OPERATION_INTERVAL)
-        search_edit.SendKeys('{Ctrl}a')
-        search_edit.SendKeys('{Delete}')
-        search_edit.SendKeys(keyword)
-        time.sleep(1.5)  # Wait for results
+        try:
+            # Try to focus the search box
+            try:
+                search_edit.Click(simulateMove=False)
+            except Exception:
+                try:
+                    search_edit.SetFocus()
+                except Exception:
+                    pass
 
-        return True
+            time.sleep(0.2)
+
+            # Clear existing content
+            try:
+                search_edit.SendKeys('{Ctrl}a')
+                time.sleep(0.1)
+                search_edit.SendKeys('{Delete}')
+                time.sleep(0.1)
+            except Exception as e:
+                logger.debug(f"Failed to clear search box: {e}")
+
+            # Input keyword
+            search_edit.SendKeys(keyword)
+            time.sleep(1.0)  # Wait for results (reduced from 1.5)
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to input search keyword: {e}")
+            return False
 
     def _clear_search(self):
         """Clear search input"""
@@ -534,12 +681,39 @@ class ChatWindow(BasePage):
             logger.warning("Search popup not found")
             return {}
 
-        search_list = popup.ListControl(AutomationId='search_list')
-        if not search_list.Exists():
+        # Try multiple possible AutomationIds for search list
+        search_list = None
+        possible_list_ids = ['search_list', 'search_result_list', 'result_list', 'list']
+
+        for list_id in possible_list_ids:
+            try:
+                lst = popup.ListControl(AutomationId=list_id)
+                if lst.Exists(maxSearchSeconds=0.5):
+                    search_list = lst
+                    break
+            except Exception:
+                continue
+
+        # If not found by ID, try to find any ListControl in popup
+        if not search_list:
+            try:
+                lists = popup.GetChildren()
+                for ctrl in lists:
+                    if ctrl.ControlTypeName == 'ListControl':
+                        search_list = ctrl
+                        break
+            except Exception:
+                pass
+
+        if not search_list:
             logger.warning("Search list not found")
             return {}
 
-        items = search_list.GetChildren()
+        try:
+            items = search_list.GetChildren()
+        except Exception as e:
+            logger.warning(f"Failed to get search list children: {e}")
+            return {}
         results = self._parse_search_results(items)
         self._last_search_results = results
 
@@ -562,8 +736,32 @@ class ChatWindow(BasePage):
             raise TargetNotFoundError(f"'{target}' not found in '{group_name}' group")
 
         logger.debug(f"Clicking: {target_result.name}")
-        target_result.ctrl.Click()
-        time.sleep(1)
+
+        # Try multiple click methods for better compatibility
+        click_success = False
+        try:
+            # Method 1: Standard Click
+            target_result.ctrl.Click()
+            click_success = True
+        except Exception as e1:
+            logger.debug(f"Standard click failed: {e1}")
+            try:
+                # Method 2: Click with simulateMove=False
+                target_result.ctrl.Click(simulateMove=False)
+                click_success = True
+            except Exception as e2:
+                logger.debug(f"Simple click failed: {e2}")
+                try:
+                    # Method 3: Use DoubleClick as fallback
+                    target_result.ctrl.DoubleClick(simulateMove=False)
+                    click_success = True
+                except Exception as e3:
+                    logger.error(f"All click methods failed: {e3}")
+
+        if not click_success:
+            return False
+
+        time.sleep(0.8)
 
         chat_input = self._get_chat_input()
         if not chat_input:
@@ -635,8 +833,19 @@ class ChatWindow(BasePage):
         if not self._paste_text_into_chat_input(message):
             return False
 
-        chat_input.SendKeys('{Enter}')
-        time.sleep(OPERATION_INTERVAL)
+        # Try multiple methods to send the message
+        try:
+            chat_input.SendKeys('{Enter}')
+        except Exception as e:
+            logger.debug(f"SendKeys Enter failed: {e}")
+            try:
+                # Fallback: try Ctrl+Enter
+                chat_input.SendKeys('{Ctrl}{Enter}')
+            except Exception as e2:
+                logger.error(f"Failed to send message: {e2}")
+                return False
+
+        time.sleep(0.3)
 
         logger.info("Message sent")
         return True

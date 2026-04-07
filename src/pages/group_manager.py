@@ -89,11 +89,24 @@ class GroupManager(BasePage):
 
     def _get_group_detail_view(self, timeout: float = 2):
         """Get the group detail panel if present."""
-        info_view = self.root.GroupControl(ClassName='mmui::ChatRoomMemberInfoView')
-        if not info_view.Exists(maxSearchSeconds=timeout):
-            logger.error("ChatRoomMemberInfoView not found")
-            return None
-        return info_view
+        # Try multiple possible class names for different WeChat versions
+        possible_class_names = [
+            'mmui::ChatRoomMemberInfoView',
+            'mmui::GroupInfoView',
+            'mmui::ChatRoomInfoView',
+            'mmui::XGroupDetailPanel',
+        ]
+
+        for class_name in possible_class_names:
+            try:
+                info_view = self.root.GroupControl(ClassName=class_name)
+                if info_view.Exists(maxSearchSeconds=0.5):
+                    return info_view
+            except Exception:
+                continue
+
+        logger.error("ChatRoomMemberInfoView not found")
+        return None
 
     def _open_and_focus_group_detail(self, group_name: str):
         """Open a group chat, show its detail panel, and focus the panel."""
@@ -122,11 +135,39 @@ class GroupManager(BasePage):
 
     def _get_member_list(self):
         """Get the group member list control if present."""
-        member_list = self.root.ListControl(AutomationId='chat_member_list')
-        if not member_list.Exists(maxSearchSeconds=2):
-            logger.error("chat_member_list not found")
-            return None
-        return member_list
+        # Try multiple possible AutomationIds for different WeChat versions
+        possible_ids = ['chat_member_list', 'member_list', 'group_member_list', 'list']
+        possible_class_names = ['mmui::QFReuseGridWidget', 'mmui::XListView', 'mmui::XListWidget']
+
+        # Try by AutomationId first
+        for auto_id in possible_ids:
+            try:
+                member_list = self.root.ListControl(AutomationId=auto_id)
+                if member_list.Exists(maxSearchSeconds=0.5):
+                    return member_list
+            except Exception:
+                continue
+
+        # Try by ClassName
+        for class_name in possible_class_names:
+            try:
+                member_list = self.root.ListControl(ClassName=class_name)
+                if member_list.Exists(maxSearchSeconds=0.5):
+                    return member_list
+            except Exception:
+                continue
+
+        # Last resort: find any ListControl in group detail area
+        try:
+            children = self.root.GetChildren()
+            for ctrl in children:
+                if ctrl.ControlTypeName == 'ListControl':
+                    return ctrl
+        except Exception:
+            pass
+
+        logger.error("chat_member_list not found")
+        return None
 
     def _scroll_list(self, ctrl, delta: int, steps: int, step_delay: float, settle_time: float) -> None:
         """Scroll a list-like control by mouse wheel."""
@@ -286,13 +327,38 @@ class GroupManager(BasePage):
 
     def _open_group_detail(self) -> bool:
         """Open group detail panel"""
-        info_btn = self.root.ButtonControl(Name='聊天信息')
-        if not info_btn.Exists(maxSearchSeconds=2):
+        # Try multiple possible button names for different WeChat versions
+        possible_names = ['聊天信息', '群聊信息', '信息', '详情']
+
+        info_btn = None
+        for name in possible_names:
+            try:
+                btn = self.root.ButtonControl(Name=name)
+                if btn.Exists(maxSearchSeconds=0.5):
+                    info_btn = btn
+                    break
+            except Exception:
+                continue
+
+        if not info_btn:
             logger.error("聊天信息 button not found")
             return False
 
-        info_btn.Click()
-        time.sleep(2)
+        try:
+            info_btn.Click(simulateMove=False)
+        except Exception as e:
+            logger.debug(f"Click failed, trying SetFocus: {e}")
+            try:
+                info_btn.SetFocus()
+                import win32con
+                win32api.keybd_event(win32con.VK_RETURN, 0, 0, 0)
+                time.sleep(0.05)
+                win32api.keybd_event(win32con.VK_RETURN, 0, win32con.KEYEVENTF_KEYUP, 0)
+            except Exception as e2:
+                logger.error(f"Failed to open group detail: {e2}")
+                return False
+
+        time.sleep(1.5)
         return True
 
     def _click_announcement_button(self) -> bool:
@@ -332,12 +398,23 @@ class GroupManager(BasePage):
         Uses Tab navigation to find and Enter to activate the button.
         """
         # First, check if we're already in edit mode (wide edit box)
-        edit = popup.EditControl(AutomationId='xeditorInputId')
-        if edit and edit.Exists(maxSearchSeconds=1):
-            rect = edit.BoundingRectangle
-            if rect and (rect.right - rect.left) > 50:
-                logger.debug("Already in edit mode")
-                return True
+        possible_ids = ['xeditorInputId', 'announcement_input', 'edit_input', 'input_field']
+        in_edit_mode = False
+
+        for auto_id in possible_ids:
+            try:
+                edit = popup.EditControl(AutomationId=auto_id)
+                if edit.Exists(maxSearchSeconds=0.3):
+                    rect = edit.BoundingRectangle
+                    if rect and (rect.right - rect.left) > 50:
+                        logger.debug("Already in edit mode")
+                        in_edit_mode = True
+                        break
+            except Exception:
+                continue
+
+        if in_edit_mode:
+            return True
 
         # Use Tab + Enter to activate edit button
         return self._find_and_activate_button(popup, '编辑群公告')
@@ -350,23 +427,53 @@ class GroupManager(BasePage):
             content: Text content to paste (ignored if paste_from_clipboard is True)
             paste_from_clipboard: If True, paste directly from current clipboard content
         """
-        edit = popup.EditControl(AutomationId='xeditorInputId')
-        if not edit.Exists(maxSearchSeconds=2):
+        # Try multiple possible AutomationIds for different WeChat versions
+        possible_ids = ['xeditorInputId', 'announcement_input', 'edit_input', 'input_field']
+        possible_class_names = ['mmui::XTextEdit', 'mmui::XValidatorTextEdit', 'mmui::XEditEx']
+
+        edit = None
+        for auto_id in possible_ids:
+            try:
+                e = popup.EditControl(AutomationId=auto_id)
+                if e.Exists(maxSearchSeconds=0.5):
+                    edit = e
+                    break
+            except Exception:
+                continue
+
+        if not edit:
+            for class_name in possible_class_names:
+                try:
+                    e = popup.EditControl(ClassName=class_name)
+                    if e.Exists(maxSearchSeconds=0.5):
+                        edit = e
+                        break
+                except Exception:
+                    continue
+
+        if not edit:
             logger.error("Announcement edit field not found")
             return False
 
-        edit.Click()
-        time.sleep(0.5)
+        try:
+            edit.Click(simulateMove=False)
+        except Exception:
+            try:
+                edit.SetFocus()
+            except Exception:
+                pass
 
-        self._send_ctrl_combo(0x41, settle_time=0.3)
+        time.sleep(0.3)
+
+        self._send_ctrl_combo(0x41, settle_time=0.2)
 
         # Copy content to clipboard (unless pasting from existing clipboard)
         if not paste_from_clipboard and content:
             import pyperclip
             pyperclip.copy(content)
-            time.sleep(0.2)
+            time.sleep(0.15)
 
-        self._send_ctrl_combo(0x56, settle_time=0.5)
+        self._send_ctrl_combo(0x56, settle_time=0.4)
 
         return True
 
