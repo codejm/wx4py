@@ -5,6 +5,7 @@ wx4py 客户端
 wx4py 的主入口。
 """
 from .core.window import WeChatWindow
+from .core.exceptions import WeChatNotFoundError
 from .pages.chat_window import ChatWindow
 from .pages.group_manager import GroupManager
 from .utils.logger import get_logger
