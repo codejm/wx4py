@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Chat window page for WeChat"""
+"""微信聊天窗口页面"""
 import hashlib
 import random
 import re
@@ -7,7 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import win32api
 import win32con
@@ -36,7 +36,7 @@ logger = get_logger(__name__)
 VK_V = 0x56
 
 
-# Search result group names
+# 搜索结果分组名称
 GROUP_CONTACTS = '联系人'
 GROUP_CHATS = '群聊'
 GROUP_FUNCTIONS = '功能'
@@ -48,9 +48,9 @@ ALL_GROUP_NAMES = [GROUP_CONTACTS, GROUP_CHATS, GROUP_FUNCTIONS, GROUP_NETWORK, 
 
 @dataclass
 class SearchResult:
-    """Search result item"""
+    """搜索结果项"""
     name: str
-    ctrl: object  # UIAutomation control
+    ctrl: object  # UIAutomation 控件
     item_type: str  # 'contact', 'function', 'network'
     auto_id: str
     group: str
@@ -58,7 +58,7 @@ class SearchResult:
 
 @dataclass(frozen=True)
 class SendRequest:
-    """Normalized send request payload."""
+    """已规范化的发送请求载荷。"""
     target: str
     message: str
     target_type: str
@@ -66,26 +66,26 @@ class SendRequest:
 
 @dataclass(frozen=True)
 class ChatHistoryRange:
-    """Timestamp matching rules for chat history collection."""
-    in_range_prefixes: Optional[set[str]]
-    too_new_prefixes: set[str]
+    """聊天记录采集的时间戳匹配规则。"""
+    in_range_prefixes: Optional[Set[str]]
+    too_new_prefixes: Set[str]
 
 
 class ChatWindow(BasePage):
     """
-    Chat window page for sending messages.
+    微信聊天窗口页面，用于发送消息。
 
-    Usage:
+    用法:
         wx = WeChatClient()
         wx.connect()
 
-        # Send to contact
+        # 发送给联系人
         wx.chat_window.send_to("大号", "Hello!")
 
-        # Send to group
+        # 发送给群聊
         wx.chat_window.send_to("测试群", "Hello!", target_type='group')
 
-        # Batch send
+        # 批量发送
         wx.chat_window.batch_send(["群1", "群2"], "Hello!")
     """
 
@@ -95,10 +95,10 @@ class ChatWindow(BasePage):
         self._run_id = str(uuid.uuid4())
         self._recent_send_records: Dict[str, float] = {}
 
-    # ==================== Private Methods ====================
+    # ==================== 私有方法 ====================
 
     def _sleep_with_jitter(self, minimum: float, maximum: float) -> float:
-        """Sleep for a random duration inside the given range."""
+        """在给定范围内随机睡眠。"""
         delay = random.uniform(minimum, maximum)
         time.sleep(delay)
         return delay
@@ -112,7 +112,7 @@ class ChatWindow(BasePage):
         started_at: float,
         exception: Optional[Exception] = None,
     ) -> None:
-        """Write structured send audit log."""
+        """写入结构化发送审计日志。"""
         payload = {
             "run_id": self._run_id,
             "target": target,
@@ -126,7 +126,7 @@ class ChatWindow(BasePage):
         log_send_audit(payload)
 
     def _normalize_target(self, target: str, target_type: str) -> str:
-        """Validate and normalize target."""
+        """验证并规范化目标。"""
         normalized_target = (target or "").strip()
         if not normalized_target:
             raise ValueError("target must not be empty")
@@ -137,7 +137,7 @@ class ChatWindow(BasePage):
         return normalized_target
 
     def _normalize_message(self, message: str) -> str:
-        """Validate and normalize message."""
+        """验证并规范化消息。"""
         normalized_message = (message or "").strip()
         if not normalized_message:
             raise ValueError("message must not be empty")
@@ -146,7 +146,7 @@ class ChatWindow(BasePage):
     def _normalize_send_args(
         self, target: str, message: str, target_type: str
     ) -> SendRequest:
-        """Validate and normalize send arguments."""
+        """验证并规范化发送参数。"""
         if target_type not in ("contact", "group"):
             raise ValueError("target_type must be 'contact' or 'group'")
 
@@ -157,12 +157,12 @@ class ChatWindow(BasePage):
         )
 
     def _make_send_record_key(self, target: str, message: str) -> str:
-        """Build deduplication key for a send operation."""
+        """构建发送操作的去重键。"""
         content_hash = hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
         return f"{target}:{content_hash}"
 
     def _was_sent_recently(self, target: str, message: str) -> bool:
-        """Check whether the same content was sent recently."""
+        """检查相同内容是否在近期已发送。"""
         key = self._make_send_record_key(target, message)
         sent_at = self._recent_send_records.get(key)
         if not sent_at:
@@ -170,7 +170,7 @@ class ChatWindow(BasePage):
         return (time.time() - sent_at) <= SEND_DEDUP_WINDOW_SECONDS
 
     def _remember_successful_send(self, target: str, message: str) -> None:
-        """Remember a successful send for duplicate suppression."""
+        """记录成功发送，用于重复抑制。"""
         now = time.time()
         cutoff = now - SEND_DEDUP_WINDOW_SECONDS
         self._recent_send_records = {
@@ -179,7 +179,7 @@ class ChatWindow(BasePage):
         self._recent_send_records[self._make_send_record_key(target, message)] = now
 
     def _send_ctrl_hotkey(self, key_code: int) -> None:
-        """Press Ctrl+<key> once via Win32 for more stable text paste."""
+        """通过 Win32 按一次 Ctrl+<key>，用于更稳定的文本粘贴。"""
         import win32api
         import win32con
 
@@ -192,26 +192,26 @@ class ChatWindow(BasePage):
         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
 
     def _rebuild_uia_session(self) -> bool:
-        """Reconnect UIA session and recover window focus."""
-        logger.warning("Rebuilding WeChat UIA session")
+        """重建 UIA 会话并恢复窗口焦点。"""
+        logger.warning("正在重建微信 UIA 会话")
         return self._window.refresh()
 
     def _sleep_between_batch_targets(self) -> None:
-        """Sleep between batch targets to reduce UI contention."""
+        """批量目标间睡眠，减少 UI 争用。"""
         time.sleep(random.uniform(BATCH_SEND_INTERVAL_MIN, BATCH_SEND_INTERVAL_MAX))
 
     def _sleep_before_send_attempt(self) -> None:
-        """Sleep briefly before each send attempt."""
+        """每次发送尝试前简短睡眠。"""
         self._sleep_with_jitter(SEND_JITTER_MIN, SEND_JITTER_MAX)
 
     def _sleep_before_send_retry(self) -> None:
-        """Sleep briefly before retrying after a failed attempt."""
+        """重试失败后简短睡眠。"""
         self._sleep_with_jitter(SEARCH_RETRY_DELAY_MIN, SEARCH_RETRY_DELAY_MAX)
 
     def _find_target_result(
         self, results: Dict[str, List[SearchResult]], target: str, target_type: str
     ) -> Optional[SearchResult]:
-        """Find the matching search result for the target."""
+        """在搜索结果中查找匹配的目标。"""
         primary_group = GROUP_CHATS if target_type == 'group' else GROUP_CONTACTS
 
         for item in results.get(primary_group, []):
@@ -226,10 +226,10 @@ class ChatWindow(BasePage):
         return None
 
     def _prepare_chat_input_for_paste(self):
-        """Focus and clear the chat input before pasting content."""
+        """聚焦并清空聊天输入框，为粘贴内容做准备。"""
         chat_input = self._get_chat_input()
         if not chat_input:
-            logger.error("Chat input not found")
+            logger.error("未找到聊天输入框")
             return None
 
         try:
@@ -251,15 +251,15 @@ class ChatWindow(BasePage):
                 chat_input.SendKeys('{Delete}')
                 time.sleep(0.1)
             except Exception as e:
-                logger.debug(f"Failed to clear chat input: {e}")
+                logger.debug(f"清空聊天输入框失败: {e}")
 
             return chat_input
         except Exception as e:
-            logger.error(f"Failed to prepare chat input: {e}")
+            logger.error(f"准备聊天输入框失败: {e}")
             return None
 
-    def _paste_text_into_chat_input(self, text: str, log_error: str = "Failed to write message to clipboard") -> bool:
-        """Paste text into the currently focused chat input via clipboard."""
+    def _paste_text_into_chat_input(self, text: str, log_error: str = "写入消息到剪贴板失败") -> bool:
+        """通过剪贴板将文本粘贴到当前聚焦的聊天输入框。"""
         if not set_text_to_clipboard(text):
             logger.error(log_error)
             return False
@@ -276,7 +276,7 @@ class ChatWindow(BasePage):
         action: Callable[[], bool],
         error_message: str,
     ) -> bool:
-        """Execute one send phase and write audit logs."""
+        """执行一个发送阶段并写入审计日志。"""
         started_at = time.time()
         try:
             if not action():
@@ -296,7 +296,7 @@ class ChatWindow(BasePage):
         return True
 
     def _send_once(self, request: SendRequest, attempt: int) -> bool:
-        """Run one full send attempt."""
+        """执行一次完整的发送尝试。"""
         self._sleep_before_send_attempt()
 
         try:
@@ -333,7 +333,7 @@ class ChatWindow(BasePage):
     def _send_with_retry_range(
         self, request: SendRequest, attempts: range
     ) -> bool:
-        """Run a range of send attempts against the current UIA session."""
+        """在当前 UIA 会话中执行一系列发送尝试。"""
         attempt_list = list(attempts)
 
         for index, attempt in enumerate(attempt_list):
@@ -345,7 +345,7 @@ class ChatWindow(BasePage):
         return False
 
     def _send_with_reconnect_fallback(self, request: SendRequest) -> bool:
-        """Run normal send retries, then rebuild the UIA session and retry once more."""
+        """先执行常规发送重试，失败后重建 UIA 会话再重试。"""
         initial_attempts = range(1, SEND_RETRY_COUNT + 1)
         if self._send_with_retry_range(request, initial_attempts):
             return True
@@ -361,112 +361,178 @@ class ChatWindow(BasePage):
         return self._send_with_retry_range(request, reconnect_attempts)
 
     def _open_chat_with_status(self, target: str, target_type: str = 'contact') -> bool:
-        """Open chat and preserve TargetNotFoundError for send workflow control."""
+        """打开聊天并保留 TargetNotFoundError，用于发送工作流控制。"""
         return self.open_chat(target, target_type, raise_on_target_not_found=True)
 
     def _get_search_edit(self, retries: int = SEARCH_RETRY_COUNT):
-        """Get main search box control (not the one in group detail panel)."""
+        """获取主搜索框控件（不是群详情面板中的搜索框）。"""
 
-        def find_edits(ctrl, results, depth=0):
-            """Recursively find edit controls with depth limit to avoid performance issues."""
-            if depth > 5:  # Limit recursion depth to prevent performance issues
+        def find_all_edits(ctrl, results, depth=0, max_depth=15):
+            """递归查找所有编辑控件。"""
+            if depth > max_depth:
                 return
             try:
                 if not ctrl:
                     return
-                if ctrl.ControlTypeName == 'EditControl':
-                    class_name = ctrl.ClassName or ''
-                    name = ctrl.Name or ''
-                    # Different WeChat builds may use different class names for search box.
-                    # Check for common search box patterns
-                    is_search_edit = (
-                        class_name in ('mmui::XValidatorTextEdit', 'mmui::XTextEdit', 'mmui::XEditEx') or
-                        '搜索' in name or
-                        (name == '' and class_name.startswith('mmui::X'))  # Allow empty name with mmui class
-                    )
-                    if is_search_edit:
+            # 检查是否是 EditControl
+                try:
+                    if ctrl.ControlTypeName == 'EditControl':
                         results.append(ctrl)
-                # Limit children traversal to avoid performance issues
-                children = ctrl.GetChildren()
-                if children and len(children) <= 50:  # Limit children count
-                    for child in children:
-                        find_edits(child, results, depth + 1)
+                except Exception:
+                    pass
+
+                # 获取子控件并递归
+                try:
+                    children = ctrl.GetChildren()
+                    if children:
+                        for child in children:
+                            find_all_edits(child, results, depth + 1, max_depth)
+                except Exception:
+                    pass
             except Exception:
-                # Ignore transient UIA traversal errors
                 return
 
-        for attempt in range(1, retries + 1):
-            edits = []
+        def is_in_group_detail_panel(edit) -> bool:
+            """检查编辑控件是否在群详情面板内。"""
             try:
-                find_edits(self.root, edits)
-            except Exception as e:
-                logger.debug(f"Error finding edits: {e}")
+                current = edit.GetParentControl()
+                depth = 0
+                while current and depth < 10:
+                    class_name = current.ClassName or ''
+                    if any(x in class_name for x in ['ChatRoomMemberInfoView', 'GroupInfoView', 'ChatRoomInfoView']):
+                        return True
+                    current = current.GetParentControl()
+                    depth += 1
+            except Exception:
+                pass
+            return False
 
-            for edit in edits:
-                # Some builds may not expose Name='搜索' consistently; allow blank name as fallback.
-                edit_name = edit.Name or ''
-                if edit_name not in ('搜索', '') and '搜索' not in edit_name:
-                    continue
+        def is_likely_search_box(edit) -> bool:
+            """判断此编辑控件是否可能是主搜索框。"""
+            try:
+                class_name = edit.ClassName or ''
+                name = edit.Name or ''
 
-                # Check if this is in group detail panel (ChatRoomMemberInfoView)
+                # 排除已知的非搜索编辑控件
+                if any(x in class_name for x in ['ChatItem', 'ChatBubble', 'Message']):
+                    return False
+
+                # 如果名称包含 '搜索'，很可能是搜索框
+                if '搜索' in name:
+                    return True
+
+                # 如果在群详情面板中，不是主搜索框
+                if is_in_group_detail_panel(edit):
+                    return False
+
+                # 微信 Qt UI 中，搜索框通常在窗口顶部附近
                 try:
-                    parent = edit.GetParentControl()
-                    grandparent = parent.GetParentControl() if parent else None
-                    great_grandparent = grandparent.GetParentControl() if grandparent else None
-
-                    # Check multiple levels for group detail panel
-                    for ancestor in [grandparent, great_grandparent]:
-                        if ancestor and 'ChatRoomMemberInfoView' in (ancestor.ClassName or ''):
-                            # This is "搜索群成员" in group detail panel
-                            # Close the panel first
-                            logger.debug("Group detail panel is open, closing...")
-                            try:
-                                self.root.SendKeys('{Esc}')
-                            except Exception:
-                                pass
-                            time.sleep(0.3)
-                            break
-                    else:
-                        # This is likely the main search box - verify it exists with short timeout
-                        try:
-                            if edit.Exists(maxSearchSeconds=0.5):
-                                return edit
-                        except Exception:
-                            pass
+                    edit_rect = edit.BoundingRectangle
+                    root_rect = self.root.BoundingRectangle
+                    if edit_rect and root_rect:
+                        # 搜索框通常在窗口顶部区域
+                        if edit_rect.top < root_rect.top + root_rect.height() * 0.3:
+                            # 并且宽度合理
+                            if edit_rect.right - edit_rect.left > 100:
+                                return True
                 except Exception:
-                    # If we can't check ancestors, try using this edit anyway
-                    try:
-                        if edit.Exists(maxSearchSeconds=0.5):
-                            return edit
-                    except Exception:
-                        pass
+                    pass
 
-            # Recovery between attempts: try returning to main surface and refocus window
+                # 如果类名匹配已知模式
+                if class_name.startswith('mmui::') and 'Edit' in class_name:
+                    # 额外检查：不在群详情中
+                    if not is_in_group_detail_panel(edit):
+                        return True
+
+            except Exception:
+                pass
+            return False
+
+        for attempt in range(1, retries + 1):
+            all_edits = []
             try:
+                find_all_edits(self.root, all_edits)
+                logger.debug(f"找到 {len(all_edits)} 个编辑控件")
+            except Exception as e:
+                logger.debug(f"查找编辑控件出错: {e}")
+
+            # 第一轮：按名称 '搜索' 查找
+            for edit in all_edits:
+                try:
+                    name = edit.Name or ''
+                    if '搜索' in name and not is_in_group_detail_panel(edit):
+                        logger.debug(f"通过名称找到搜索框: {name}")
+                        return edit
+                except Exception:
+                    pass
+
+            # 第二轮：使用启发式查找主搜索框
+            candidates = []
+            for edit in all_edits:
+                try:
+                    if is_likely_search_box(edit):
+                        # 为候选结果评分
+                        score = 0
+                        rect = edit.BoundingRectangle
+                        root_rect = self.root.BoundingRectangle
+
+                        if rect and root_rect:
+                            # 优先选择靠近顶部的编辑框
+                            relative_top = (rect.top - root_rect.top) / root_rect.height()
+                            if relative_top < 0.2:  # 窗口顶部 20%
+                                score += 100
+                            elif relative_top < 0.4:  # 窗口顶部 40%
+                                score += 50
+
+                            # 优先选择较宽的编辑框（搜索框通常较宽）
+                            width = rect.right - rect.left
+                            if width > 200:
+                                score += 50
+                            elif width > 100:
+                                score += 25
+
+                        # 优先选择 mmui 类名的编辑框
+                        class_name = edit.ClassName or ''
+                        if 'mmui::' in class_name:
+                            score += 20
+
+                        candidates.append((score, edit))
+                except Exception:
+                    pass
+
+            if candidates:
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                best_edit = candidates[0][1]
+                logger.debug(f"选择得分为 {candidates[0][0]} 的搜索框")
+                return best_edit
+
+            # 尝试间恢复操作
+            try:
+                # 关闭任何打开的面板
                 self.root.SendKeys('{Esc}')
-                time.sleep(0.1)
+                time.sleep(0.2)
                 self.root.SendKeys('{Esc}')
-                time.sleep(0.1)
-                # Force-open global search in some builds where search box is lazily created
+                time.sleep(0.2)
+                # 强制打开全局搜索
                 self.root.SendKeys('{Ctrl}f')
-                time.sleep(0.3)
+                time.sleep(0.5)
             except Exception:
                 pass
 
             self._window.activate()
-            time.sleep(0.3)
-            logger.debug(f"Search box not found, retrying ({attempt}/{retries})")
+            time.sleep(0.5)
+            logger.debug(f"未找到搜索框，重试中 ({attempt}/{retries})")
 
-        logger.warning("Search box not found")
+        logger.warning("未找到搜索框")
         return None
 
     def _get_chat_input(self):
-        """Get chat input field"""
-        # Try multiple methods to find chat input field for different WeChat versions
+        """获取聊天输入框"""
+        # 尝试多种方法查找聊天输入框，以兼容不同微信版本
         possible_ids = ['chat_input_field', 'input_field', 'msg_input', 'edit_input']
         possible_class_names = ['mmui::XTextEdit', 'mmui::XValidatorTextEdit', 'mmui::XEditEx', 'mmui::XRichEdit']
 
-        # Try by AutomationId first
+        # 先按 AutomationId 查找
         for auto_id in possible_ids:
             try:
                 edit = self.root.EditControl(AutomationId=auto_id)
@@ -475,21 +541,21 @@ class ChatWindow(BasePage):
             except Exception:
                 continue
 
-        # Try by ClassName
+        # 按 ClassName 查找
         for class_name in possible_class_names:
             try:
                 edit = self.root.EditControl(ClassName=class_name)
-                # Additional check: chat input should be in the lower part of window
+                # 额外检查：聊天输入框应在窗口下半部分
                 if edit.Exists(maxSearchSeconds=0.5):
                     rect = edit.BoundingRectangle
                     root_rect = self.root.BoundingRectangle
-                    # Chat input is typically in bottom half of window
+                    # 聊天输入框通常在窗口下半部
                     if rect and root_rect and rect.top > (root_rect.top + root_rect.height() * 0.5):
                         return edit
             except Exception:
                 continue
 
-        # Last resort: find all EditControls and pick the one most likely to be chat input
+        # 最后手段：查找所有 EditControl 并挑选最可能是聊天输入框的
         try:
             edits = self.root.GetChildren()
             candidates = []
@@ -498,7 +564,7 @@ class ChatWindow(BasePage):
                     rect = ctrl.BoundingRectangle
                     root_rect = self.root.BoundingRectangle
                     if rect and root_rect:
-                        # Prefer edits in bottom area
+                        # 优先选择底部区域的编辑框
                         score = rect.top - root_rect.top
                         candidates.append((score, ctrl))
 
@@ -511,8 +577,8 @@ class ChatWindow(BasePage):
         return None
 
     def _get_search_popup(self):
-        """Get search popup window"""
-        # Try multiple possible class names for search popup in different WeChat versions
+        """获取搜索弹出窗口"""
+        # 尝试多种可能的类名查找搜索弹出窗口，以兼容不同微信版本
         possible_class_names = [
             'mmui::SearchContentPopover',
             'mmui::SearchPopover',
@@ -528,7 +594,7 @@ class ChatWindow(BasePage):
             except Exception:
                 continue
 
-        # Fallback: try to find by AutomationId or other properties
+        # 回退：尝试按 AutomationId 或其他属性查找
         try:
             popup = self.root.WindowControl(AutomationId='search_popup')
             if popup.Exists(maxSearchSeconds=0.5):
@@ -540,13 +606,13 @@ class ChatWindow(BasePage):
 
     def _parse_search_results(self, items) -> Dict[str, List[SearchResult]]:
         """
-        Parse search results into groups.
+        解析搜索结果并分组。
 
         Args:
-            items: List items from search list
+            items: 搜索列表中的子项
 
         Returns:
-            Dict mapping group name to list of SearchResult
+            分组名到 SearchResult 列表的字典
         """
         groups: Dict[str, List[SearchResult]] = {}
         current_group: Optional[str] = None
@@ -556,18 +622,18 @@ class ChatWindow(BasePage):
             name = item.Name or ""
             auto_id = item.AutomationId or ""
 
-            # Group header: XTableCell without AutoId
+            # 分组标题：没有 AutoId 的 XTableCell
             if class_name == 'mmui::XTableCell' and not auto_id:
                 if name in ALL_GROUP_NAMES:
                     current_group = name
                     groups[current_group] = []
-                    logger.debug(f"Found group: {name}")
+                    logger.debug(f"找到分组: {name}")
                     continue
                 elif '查看全部' in name:
-                    # Skip "查看全部" button
+                    # 跳过 "查看全部" 按钮
                     continue
                 else:
-                    # Network search result item
+                    # 网络搜索结果项
                     if current_group == GROUP_NETWORK:
                         result = SearchResult(
                             name=name,
@@ -579,7 +645,7 @@ class ChatWindow(BasePage):
                         groups.setdefault(GROUP_NETWORK, []).append(result)
                     continue
 
-            # Function item: XTableCell with search_item_function AutoId
+            # 功能项：带 search_item_function AutoId 的 XTableCell
             if auto_id.startswith('search_item_function'):
                 result = SearchResult(
                     name=name,
@@ -589,13 +655,13 @@ class ChatWindow(BasePage):
                     group=GROUP_FUNCTIONS
                 )
                 groups.setdefault(GROUP_FUNCTIONS, []).append(result)
-                logger.debug(f"Found function item: {name}")
+                logger.debug(f"找到功能项: {name}")
                 continue
 
-            # Contact/Chat item: SearchContentCellView with AutoId
+            # 联系人/群聊项：带 AutoId 的 SearchContentCellView
             if 'SearchContentCellView' in class_name:
                 if auto_id.startswith('search_item_'):
-                    # Contact or group chat
+                    # 联系人或群聊
                     result = SearchResult(
                         name=name,
                         ctrl=item,
@@ -604,84 +670,112 @@ class ChatWindow(BasePage):
                         group=current_group or '未知'
                     )
                     groups.setdefault(current_group or '未知', []).append(result)
-                    logger.debug(f"Found contact item: {name} in {current_group}")
+                    logger.debug(f"找到联系人项: {name} 在 {current_group}")
 
         return groups
 
     def _input_search(self, keyword: str) -> bool:
         """
-        Input search keyword.
+        输入搜索关键词。
 
         Args:
-            keyword: Search keyword
+            keyword: 搜索关键词
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         search_edit = self._get_search_edit(retries=SEARCH_RETRY_COUNT)
         if not search_edit:
-            logger.error("Search box not found")
+            logger.error("未找到搜索框")
             return False
 
         try:
-            # Try to focus the search box
+            # 尝试多种方式聚焦搜索框
+            focused = False
+
+            # 方法 1：Click 点击
             try:
                 search_edit.Click(simulateMove=False)
-            except Exception:
+                focused = True
+            except Exception as e1:
+                logger.debug(f"Click 点击失败: {e1}")
+
+            # 方法 2：SetFocus
+            if not focused:
                 try:
                     search_edit.SetFocus()
-                except Exception:
-                    pass
+                    focused = True
+                except Exception as e2:
+                    logger.debug(f"SetFocus 聚焦失败: {e2}")
 
-            time.sleep(0.2)
-
-            # Clear existing content
+            # 方法 3：用 Ctrl+F 确保搜索激活
             try:
+                self.root.SendKeys('{Ctrl}f')
+                time.sleep(0.3)
+            except Exception:
+                pass
+
+            time.sleep(0.3)
+
+            # 使用多种方法清除已有内容
+            try:
+                # 尝试 Ctrl+A 然后 Delete
                 search_edit.SendKeys('{Ctrl}a')
                 time.sleep(0.1)
                 search_edit.SendKeys('{Delete}')
                 time.sleep(0.1)
             except Exception as e:
-                logger.debug(f"Failed to clear search box: {e}")
+                logger.debug(f"使用 Ctrl+A/Delete 清除搜索框失败: {e}")
+                try:
+                    # 回退：全选并输入
+                    search_edit.SendKeys('{Ctrl}a')
+                    time.sleep(0.1)
+                except Exception:
+                    pass
 
-            # Input keyword
-            search_edit.SendKeys(keyword)
-            time.sleep(1.0)  # Wait for results (reduced from 1.5)
+            # 输入关键词
+            try:
+                search_edit.SendKeys(keyword)
+            except Exception as e:
+                logger.error(f"向搜索框发送按键失败: {e}")
+                return False
+
+            time.sleep(1.0)  # 等待搜索结果
 
             return True
         except Exception as e:
-            logger.error(f"Failed to input search keyword: {e}")
+            logger.error(f"输入搜索关键词失败: {e}")
             return False
 
     def _clear_search(self):
-        """Clear search input"""
+        """清除搜索输入"""
         search_edit = self._get_search_edit()
         if search_edit:
             search_edit.SendKeys('{Esc}')
 
-    # ==================== Public Methods ====================
+    # ==================== 公开方法 ====================
 
     def search(self, keyword: str) -> Dict[str, List[SearchResult]]:
         """
-        Search and return all results grouped.
+        搜索并返回按分组归类的全部结果。
 
         Args:
-            keyword: Search keyword
+            keyword: 搜索关键词
 
         Returns:
-            Dict mapping group name to list of SearchResult
+            Dict: 分组名称 -> SearchResult 列表的映射
         """
-        logger.info(f"Searching: {keyword}")
+        logger.info(f"搜索: {keyword}")
 
         if not self._input_search(keyword):
             return {}
 
         popup = self._get_search_popup()
         if not popup:
-            logger.warning("Search popup not found")
+            logger.warning("未找到搜索弹出面板")
             return {}
 
-        # Try multiple possible AutomationIds for search list
+        # 尝试多个可能的 AutomationId 查找搜索列表
         search_list = None
         possible_list_ids = ['search_list', 'search_result_list', 'result_list', 'list']
 
@@ -694,7 +788,7 @@ class ChatWindow(BasePage):
             except Exception:
                 continue
 
-        # If not found by ID, try to find any ListControl in popup
+        # 若按 ID 未找到，尝试在弹出面板中查找任意 ListControl
         if not search_list:
             try:
                 lists = popup.GetChildren()
@@ -706,27 +800,27 @@ class ChatWindow(BasePage):
                 pass
 
         if not search_list:
-            logger.warning("Search list not found")
+            logger.warning("未找到搜索列表")
             return {}
 
         try:
             items = search_list.GetChildren()
         except Exception as e:
-            logger.warning(f"Failed to get search list children: {e}")
+            logger.warning(f"获取搜索列表子控件失败: {e}")
             return {}
         results = self._parse_search_results(items)
         self._last_search_results = results
 
-        # Log results
+        # 记录结果
         for group, items in results.items():
-            logger.debug(f"Group '{group}': {len(items)} items")
+            logger.debug(f"分组 '{group}': {len(items)} 条")
 
         return results
 
     def _open_chat_once(self, target: str, target_type: str = 'contact') -> bool:
-        """Single attempt to search and open a chat."""
+        """单次尝试搜索并打开聊天。"""
         group_name = GROUP_CHATS if target_type == 'group' else GROUP_CONTACTS
-        logger.info(f"Opening chat: {target} (type: {target_type})")
+        logger.info(f"正在打开聊天: {target} (类型: {target_type})")
 
         results = self.search(target)
         target_result = self._find_target_result(results, target, target_type)
@@ -735,28 +829,28 @@ class ChatWindow(BasePage):
             self._clear_search()
             raise TargetNotFoundError(f"'{target}' not found in '{group_name}' group")
 
-        logger.debug(f"Clicking: {target_result.name}")
+        logger.debug(f"点击: {target_result.name}")
 
-        # Try multiple click methods for better compatibility
+        # 尝试多种点击方式以提升兼容性
         click_success = False
         try:
-            # Method 1: Standard Click
+            # 方法 1：标准 Click
             target_result.ctrl.Click()
             click_success = True
         except Exception as e1:
-            logger.debug(f"Standard click failed: {e1}")
+            logger.debug(f"标准 Click 失败: {e1}")
             try:
-                # Method 2: Click with simulateMove=False
+                # 方法 2：Click(simulateMove=False)
                 target_result.ctrl.Click(simulateMove=False)
                 click_success = True
             except Exception as e2:
-                logger.debug(f"Simple click failed: {e2}")
+                logger.debug(f"简单 Click 失败: {e2}")
                 try:
-                    # Method 3: Use DoubleClick as fallback
+                    # 方法 3：DoubleClick 兜底
                     target_result.ctrl.DoubleClick(simulateMove=False)
                     click_success = True
                 except Exception as e3:
-                    logger.error(f"All click methods failed: {e3}")
+                    logger.error(f"所有点击方式均失败: {e3}")
 
         if not click_success:
             return False
@@ -765,10 +859,10 @@ class ChatWindow(BasePage):
 
         chat_input = self._get_chat_input()
         if not chat_input:
-            logger.error("Chat input not found after opening chat")
+            logger.error("打开聊天后未找到输入框")
             return False
 
-        logger.info(f"Chat opened: {target}")
+        logger.info(f"聊天已打开: {target}")
         return True
 
     def open_chat(
@@ -778,17 +872,16 @@ class ChatWindow(BasePage):
         raise_on_target_not_found: bool = False,
     ) -> bool:
         """
-        Search and open chat with target.
+        搜索并打开与目标的聊天。
 
         Args:
-            target: Contact or group name
-            target_type: 'contact' or 'group'
-            raise_on_target_not_found: If True, preserve TargetNotFoundError for
-                callers that need to distinguish a missing target from transient
-                UI failures.
+            target: 联系人或群名称
+            target_type: 'contact' 或 'group'
+            raise_on_target_not_found: 为 True 时保留 TargetNotFoundError，
+                以便调用方区分"找不到目标"和"暂时性 UI 故障"。
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         for attempt in range(1, SEARCH_RETRY_COUNT + 1):
             try:
@@ -797,7 +890,7 @@ class ChatWindow(BasePage):
             except TargetNotFoundError:
                 if raise_on_target_not_found:
                     raise
-                logger.error(f"Target chat not found: '{target}'")
+                logger.error(f"未找到目标聊天: '{target}'")
                 return False
 
             self._clear_search()
@@ -806,25 +899,25 @@ class ChatWindow(BasePage):
                 SEARCH_RETRY_DELAY_MIN, SEARCH_RETRY_DELAY_MAX
             )
             logger.debug(
-                f"Open chat retry scheduled for '{target}' "
-                f"({attempt}/{SEARCH_RETRY_COUNT}, slept {delay:.2f}s)"
+                f"打开聊天重试已计划: '{target}' "
+                f"({attempt}/{SEARCH_RETRY_COUNT}, 等待 {delay:.2f}秒)"
             )
 
-        logger.error(f"Failed to open chat after retries: {target}")
+        logger.error(f"重试后仍无法打开聊天: {target}")
         self._clear_search()
         return False
 
     def send_message(self, message: str) -> bool:
         """
-        Send message in current chat.
+        在当前聊天中发送消息。
 
         Args:
-            message: Message to send
+            message: 要发送的消息
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
-        logger.info(f"Sending message: {message[:20]}...")
+        logger.info(f"发送消息: {message[:20]}...")
 
         chat_input = self._prepare_chat_input_for_paste()
         if not chat_input:
@@ -833,40 +926,40 @@ class ChatWindow(BasePage):
         if not self._paste_text_into_chat_input(message):
             return False
 
-        # Try multiple methods to send the message
+        # 尝试多种方式发送消息
         try:
             chat_input.SendKeys('{Enter}')
         except Exception as e:
-            logger.debug(f"SendKeys Enter failed: {e}")
+            logger.debug(f"SendKeys Enter 失败: {e}")
             try:
-                # Fallback: try Ctrl+Enter
+                # 兜底：尝试 Ctrl+Enter
                 chat_input.SendKeys('{Ctrl}{Enter}')
             except Exception as e2:
-                logger.error(f"Failed to send message: {e2}")
+                logger.error(f"发送消息失败: {e2}")
                 return False
 
         time.sleep(0.3)
 
-        logger.info("Message sent")
+        logger.info("消息已发送")
         return True
 
     def send_to(self, target: str, message: str, target_type: str = 'contact') -> bool:
         """
-        Open chat and send message.
+        打开聊天并发送消息。
 
         Args:
-            target: Contact or group name
-            message: Message to send
-            target_type: 'contact' or 'group'
+            target: 联系人或群名称
+            message: 要发送的消息
+            target_type: 'contact' 或 'group'
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         request = self._normalize_send_args(target, message, target_type)
 
         if self._was_sent_recently(request.target, request.message):
             logger.warning(
-                f"Skipping duplicate send within {SEND_DEDUP_WINDOW_SECONDS}s: {request.target}"
+                f"跳过 {SEND_DEDUP_WINDOW_SECONDS} 秒内的重复发送: {request.target}"
             )
             return True
 
@@ -874,26 +967,25 @@ class ChatWindow(BasePage):
             if self._send_with_reconnect_fallback(request):
                 return True
         except TargetNotFoundError:
-            logger.error(f"Target chat not found: '{request.target}'")
+            logger.error(f"未找到目标聊天: '{request.target}'")
             return False
 
-        logger.error(f"Failed to send message to '{request.target}' after retries")
+        logger.error(f"重试后仍无法向 '{request.target}' 发送消息")
         return False
 
     def batch_send(self, targets: List[str], message: str, target_type: str = 'group') -> Dict[str, bool]:
         """
-
-        Send message to multiple targets.
+        向多个目标发送消息。
 
         Args:
-            targets: List of contact or group names
-            message: Message to send
-            target_type: 'contact' or 'group'
+            targets: 联系人或群名称列表
+            message: 要发送的消息
+            target_type: 'contact' 或 'group'
 
         Returns:
-            Dict mapping target name to success status
+            Dict: 目标名称 -> 发送是否成功的映射
         """
-        logger.info(f"Batch sending to {len(targets)} targets")
+        logger.info(f"批量发送到 {len(targets)} 个目标")
 
         normalized_message = self._normalize_message(message)
 
@@ -903,29 +995,29 @@ class ChatWindow(BasePage):
             results[target] = success
             self._sleep_between_batch_targets()
 
-        # Summary
+        # 汇总结果
         success_count = sum(1 for v in results.values() if v)
-        logger.info(f"Batch send complete: {success_count}/{len(targets)} successful")
+        logger.info(f"批量发送完成: {success_count}/{len(targets)} 成功")
 
         return results
 
     @property
     def last_search_results(self) -> Dict[str, List[SearchResult]]:
-        """Get last search results"""
+        """获取上次搜索结果"""
         return self._last_search_results
 
     def send_file(self, file_path, message: str = None) -> bool:
         """
-        Send file in current chat.
+        在当前聊天中发送文件。
 
         Args:
-            file_path: Path to file (or list of paths)
-            message: Optional message to send with the file
+            file_path: 文件路径（或路径列表）
+            message: 可选的附加消息
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
-        logger.info(f"Sending file: {file_path}")
+        logger.info(f"发送文件: {file_path}")
 
         chat_input = self._prepare_chat_input_for_paste()
         if not chat_input:
@@ -939,24 +1031,24 @@ class ChatWindow(BasePage):
         self._send_ctrl_hotkey(VK_V)
         time.sleep(0.5)
 
-        # Add message if provided
+        # 如果提供了附加消息则追加
         normalized_message = self._normalize_message(message) if message is not None else ""
         if normalized_message:
             if not self._paste_text_into_chat_input(
                 normalized_message,
-                log_error="Failed to write file message to clipboard",
+                log_error="写入文件消息到剪贴板失败",
             ):
                 return False
 
-        # Press Enter to send
+        # 按回车发送
         chat_input.SendKeys('{Enter}')
         time.sleep(0.5)
 
-        logger.info("File sent")
+        logger.info("文件已发送")
         return True
 
     def _set_files_to_clipboard(self, file_path) -> bool:
-        """Set file paths to clipboard and surface failures consistently."""
+        """将文件路径设置到剪贴板，并统一处理失败情况。"""
         try:
             copied = set_files_to_clipboard(file_path)
         except ValueError as exc:
@@ -964,30 +1056,30 @@ class ChatWindow(BasePage):
             return False
 
         if not copied:
-            logger.error("Failed to copy file paths to clipboard")
+            logger.error("复制文件路径到剪贴板失败")
             return False
 
         return True
 
     def send_file_to(self, target: str, file_path, target_type: str = 'contact', message: str = None) -> bool:
         """
-        Open chat and send file.
+        打开聊天并发送文件。
 
         Args:
-            target: Contact or group name
-            file_path: Path to file (or list of paths)
-            target_type: 'contact' or 'group'
-            message: Optional message to send with the file
+            target: 联系人或群名称
+            file_path: 文件路径（或路径列表）
+            target_type: 'contact' 或 'group'
+            message: 可选的附加消息
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         if not self.open_chat(target, target_type):
             return False
         return self.send_file(file_path, message)
 
     def _get_chat_history_range(self, since: str) -> ChatHistoryRange:
-        """Resolve timestamp prefix rules for a chat history query."""
+        """根据 since 参数解析聊天记录时间戳前缀规则。"""
         range_in = {
             'today': {'今天'},
             'yesterday': {'昨天'},
@@ -1006,7 +1098,7 @@ class ChatWindow(BasePage):
         )
 
     def _normalize_history_timestamp(self, ts: str, today: date, yesterday: date) -> str:
-        """Normalize long-form timestamps to the short prefixes used by range filters."""
+        """将长格式时间戳标准化为范围过滤器使用的短前缀。"""
         if re.match(r'^\d{1,2}:\d{2}', ts):
             return '今天'
 
@@ -1035,7 +1127,7 @@ class ChatWindow(BasePage):
         today: date,
         yesterday: date,
     ) -> str:
-        """Return whether a timestamp is in range, newer than range, or too old."""
+        """返回时间戳是在范围内、比范围新、还是太旧。"""
         if not ts or history_range.in_range_prefixes is None:
             return 'in_range'
 
@@ -1047,20 +1139,20 @@ class ChatWindow(BasePage):
         return 'too_old'
 
     def _get_chat_message_list(self):
-        """Get the chat message list control if available."""
+        """获取聊天消息列表控件（如果可用）。"""
         msg_list = self.root.ListControl(AutomationId='chat_message_list')
         if not msg_list.Exists(maxSearchSeconds=2):
-            logger.error("chat_message_list not found")
+            logger.error("未找到 chat_message_list")
             return None
         return msg_list
 
-    def _get_message_list_center(self, msg_list) -> tuple[int, int]:
-        """Return the center point of the message list for wheel scrolling."""
+    def _get_message_list_center(self, msg_list) -> Tuple[int, int]:
+        """返回消息列表的中心点，用于滚轮滚动。"""
         rect = msg_list.BoundingRectangle
         return (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
 
-    def _read_visible_chat_items(self, msg_list) -> list[tuple[str, str]]:
-        """Read visible timestamp and message items from the current chat view."""
+    def _read_visible_chat_items(self, msg_list) -> List[Tuple[str, str]]:
+        """读取当前聊天视图中可见的时间戳和消息项。"""
         time_cls = 'mmui::ChatItemView'
         msg_types = {'mmui::ChatTextItemView', 'mmui::ChatBubbleItemView'}
         time_re = re.compile(r'^(今天|昨天|星期[一二三四五六日]|\d{1,2}月\d{1,2}日|\d{1,2}/\d{1,2}|\d{4}年|\d{1,2}:\d{2})')
@@ -1081,7 +1173,7 @@ class ChatWindow(BasePage):
         return items
 
     def _scroll_message_list(self, cx: int, cy: int, delta: int, steps: int, step_delay: float, settle_time: float) -> None:
-        """Scroll the message list with consistent cursor placement and timing."""
+        """以一致的光标位置和时序滚动消息列表。"""
         win32api.SetCursorPos((cx, cy))
         for _ in range(steps):
             win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, 0, 0, delta, 0)
@@ -1089,8 +1181,8 @@ class ChatWindow(BasePage):
         time.sleep(settle_time)
 
     def _scroll_message_list_to_bottom(self, msg_list, cx: int, cy: int) -> None:
-        """Scroll to the newest visible messages before collecting history."""
-        logger.debug("Scrolling to bottom...")
+        """在采集历史记录前先滚动到最新消息。"""
+        logger.debug("滚动到底部...")
         previous_bottom = None
         stuck_count = 0
         while stuck_count < 3:
@@ -1108,36 +1200,36 @@ class ChatWindow(BasePage):
             previous_bottom = current_bottom
             self._scroll_message_list(cx, cy, delta=-360, steps=5, step_delay=0.05, settle_time=0.4)
 
-        logger.debug("Reached bottom, starting upward collection.")
+        logger.debug("已到达底部，开始向上采集。")
         time.sleep(0.3)
 
     def get_chat_history(self, target: str, target_type: str = 'contact',
                          since: str = 'today', max_count: int = 500) -> list:
         """
-        Get chat history for a contact or group.
+        获取联系人或群的聊天记录。
 
-        Scrolls up until messages older than `since` are reached, then stops.
-        Returns messages in chronological order (oldest first) as JSON-serialisable dicts.
+        向上滚动直到遇到早于 `since` 的消息后停止。
+        返回按时间顺序排列（最旧在前）的可 JSON 序列化字典列表。
 
-        Each item:
+        每个条目:
             {
                 'type':    'text' | 'link' | 'system',
-                'content': str,    # full message text
-                'time':    str,    # timestamp label attached to this message
+                'content': str,    # 完整消息文本
+                'time':    str,    # 附属于该消息的时间戳标签
             }
 
         Args:
-            target:      Contact or group name
-            target_type: 'contact' or 'group'
-            since:       Date range to collect.
-                         'today'     – only today's messages
-                         'yesterday' – only yesterday's messages
-                         'week'      – since 星期X (this week)
-                         'all'       – keep scrolling until no new messages appear
-            max_count:   Hard limit on number of messages returned (safety cap)
+            target:      联系人或群名称
+            target_type: 'contact' 或 'group'
+            since:       采集的日期范围。
+                         'today'     – 仅今天的消息
+                         'yesterday' – 仅昨天的消息
+                         'week'      – 本周以来（星期X）
+                         'all'       – 持续滚动直到没有新消息
+            max_count:   返回消息数量的硬限制（安全上限）
 
-        Limitations:
-            Sender names are not exposed by WeChat's Qt UIA provider.
+        限制:
+            微信的 Qt UIA 提供程序不暴露发送者名称。
 
         Returns:
             list[dict]
@@ -1147,7 +1239,7 @@ class ChatWindow(BasePage):
         yesterday = today - timedelta(days=1)
 
         if not self.open_chat(target, target_type):
-            logger.error(f"Failed to open chat: {target}")
+            logger.error(f"无法打开聊天: {target}")
             return []
         time.sleep(1)
 
@@ -1157,18 +1249,18 @@ class ChatWindow(BasePage):
 
         cx, cy = self._get_message_list_center(msg_list)
 
-        # collected newest-first while scrolling; reversed at the end
+        # 滚动采集时按最新在前顺序，最终反转
         collected:   list = []
-        seen_keys:   set  = set()   # (time_label, content) to deduplicate
+        seen_keys:   set  = set()   # (time_label, content) 用于去重
         current_ts:  str  = ""
-        prev_top:    str  = None    # content of first visible item, scroll-position indicator
+        prev_top:    str  = None    # 第一个可见项的内容，滚动位置指示器
         stuck_count: int  = 0
 
-        # Focus the list without clicking (click would trigger image/link items)
+        # 聚焦列表但不点击（点击会触发图片/链接项）
         msg_list.SetFocus()
         time.sleep(0.3)
 
-        # Scroll to bottom first so we always start from the newest messages
+        # 先滚动到底部，确保从最新消息开始
         self._scroll_message_list_to_bottom(msg_list, cx, cy)
 
         stop_reason = ''
@@ -1176,7 +1268,7 @@ class ChatWindow(BasePage):
             batch = self._read_visible_chat_items(msg_list)
             stop_now = False
 
-            # Detect scroll progress by the first visible item changing
+            # 通过第一个可见项是否变化来检测滚动进度
             top_item = batch[0][1] if batch else ''
             if top_item == prev_top:
                 stuck_count += 1
@@ -1184,7 +1276,7 @@ class ChatWindow(BasePage):
                 stuck_count = 0
             prev_top = top_item
 
-            # Process the batch — iterate top-to-bottom (oldest first in view)
+            # 处理当前批次 — 从上到下遍历（视图中最旧在前）
             for kind, name in batch:
                 if kind == 'time':
                     current_ts = name
@@ -1245,5 +1337,5 @@ class ChatWindow(BasePage):
             f"(since='{since}', stop='{stop_reason}')"
         )
 
-        collected.reverse()   # oldest first
+        collected.reverse()   # 最旧在前
         return collected

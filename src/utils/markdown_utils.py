@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Markdown and clipboard utilities"""
+"""微信公告 Markdown 与剪贴板工具"""
 import markdown
 import win32clipboard
 from bs4 import BeautifulSoup
@@ -7,21 +7,21 @@ from bs4 import BeautifulSoup
 
 def markdown_to_html(md_content: str) -> str:
     """
-    Convert markdown to styled HTML.
+    将 Markdown 转换为带内联样式的 HTML。
 
     Args:
-        md_content: Markdown content string
+        md_content: Markdown 内容字符串
 
     Returns:
-        HTML string with inline styles
+        带内联样式的 HTML 字符串
     """
-    # Convert markdown to HTML
+    # 将 Markdown 转换为 HTML
     html_body = markdown.markdown(md_content, extensions=['tables', 'fenced_code'])
 
-    # Add inline styles for better rendering
+    # 添加内联样式以获得更好的渲染效果
     styled_html = html_body
 
-    # Style tables
+    # 表格样式
     styled_html = styled_html.replace(
         '<table>',
         '<table style="border-collapse: collapse; width: 100%; margin: 10px 0;">'
@@ -35,7 +35,7 @@ def markdown_to_html(md_content: str) -> str:
         '<td style="border: 1px solid #ddd; padding: 8px;">'
     )
 
-    # Style headers
+    # 标题样式
     styled_html = styled_html.replace(
         '<h1>',
         '<h1 style="font-size: 20px; font-weight: bold; margin: 15px 0 10px 0;">'
@@ -54,17 +54,17 @@ def markdown_to_html(md_content: str) -> str:
 
 def copy_html_to_clipboard(html: str) -> bool:
     """
-    Copy HTML to clipboard in CF_HTML format for Windows.
+    将 HTML 以 CF_HTML 格式复制到剪贴板（Windows）。
 
-    This allows pasting formatted content into applications like WeChat.
+    这允许将格式化内容粘贴到微信等应用程序中。
 
     Args:
-        html: HTML content string
+        html: HTML 内容字符串
 
     Returns:
-        True if successful
+        成功时返回 True
     """
-    # Create CF_HTML format with proper header
+    # 创建包含正确头部的 CF_HTML 格式
     html_with_fragment = f'''<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -77,7 +77,7 @@ def copy_html_to_clipboard(html: str) -> bool:
 
     html_bytes = html_with_fragment.encode('utf-8')
 
-    # Create header template
+    # 创建头部模板
     header_template = (
         "Version:0.9\r\n"
         "StartHTML:000000000\r\n"
@@ -86,7 +86,7 @@ def copy_html_to_clipboard(html: str) -> bool:
         "EndFragment:{end_fragment:09d}\r\n"
     )
 
-    # Calculate offsets
+    # 计算偏移量
     start_html = len(header_template.format(end_html=0, end_fragment=0).encode('utf-8'))
     end_html = start_html + len(html_bytes)
 
@@ -97,7 +97,7 @@ def copy_html_to_clipboard(html: str) -> bool:
         start_fragment = start_html + start_fragment + len('<!--StartFragment-->')
         end_fragment = start_html + end_fragment
 
-    # Create final header
+    # 创建最终头部
     header = (
         f"Version:0.9\r\n"
         f"StartHTML:{start_html:09d}\r\n"
@@ -106,19 +106,19 @@ def copy_html_to_clipboard(html: str) -> bool:
         f"EndFragment:{end_fragment:09d}\r\n"
     )
 
-    # Combine header and HTML
+    # 组合头部和 HTML
     cf_html = header.encode('utf-8') + html_bytes
 
-    # Open clipboard and set data
+    # 打开剪贴板并设置数据
     try:
         win32clipboard.OpenClipboard()
         win32clipboard.EmptyClipboard()
 
-        # Register and set HTML format
+        # 注册并设置 HTML 格式
         cf_html_format = win32clipboard.RegisterClipboardFormat("HTML Format")
         win32clipboard.SetClipboardData(cf_html_format, cf_html)
 
-        # Also set plain text as fallback
+        # 同时设置纯文本作为备用
         soup = BeautifulSoup(html, 'html.parser')
         plain_text = soup.get_text(separator='\n')
         win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, plain_text)
@@ -130,13 +130,13 @@ def copy_html_to_clipboard(html: str) -> bool:
 
 def read_markdown_file(file_path: str) -> str:
     """
-    Read markdown file content.
+    读取 Markdown 文件内容。
 
     Args:
-        file_path: Path to markdown file
+        file_path: Markdown 文件路径
 
     Returns:
-        Markdown content string
+        Markdown 内容字符串
     """
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()

@@ -1,37 +1,37 @@
 # -*- coding: utf-8 -*-
-"""Custom exceptions for wx4py"""
+"""自定义异常类"""
 
 
 class WeChatError(Exception):
-    """Base exception for wx4py"""
+    """wx4py 基础异常类"""
     pass
 
 
 class WeChatNotFoundError(WeChatError):
-    """WeChat window not found"""
+    """微信窗口未找到"""
     pass
 
 
 class WeChatNotConnectedError(WeChatError):
-    """WeChat not connected or initialized"""
+    """微信未连接或未初始化"""
     pass
 
 
 class UIAError(WeChatError):
-    """UIAutomation related error"""
+    """UIAutomation 相关错误"""
     pass
 
 
 class ControlNotFoundError(UIAError):
-    """UI control not found"""
+    """UI 控件未找到"""
     pass
 
 
 class TargetNotFoundError(ControlNotFoundError):
-    """Target chat not found in search results"""
+    """目标聊天在搜索结果中未找到"""
     pass
 
 
 class RegistryError(WeChatError):
-    """Registry operation error"""
+    """注册表操作错误"""
     pass

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""UIAutomation wrapper for WeChat"""
+"""微信 UIAutomation 封装器"""
 
 from . import uiautomation as uia
 
@@ -11,14 +11,14 @@ logger = get_logger(__name__)
 
 
 class UIAWrapper:
-    """Wrapper for UIAutomation operations"""
+    """UIAutomation 操作封装器"""
 
     def __init__(self, hwnd: int = None):
         """
-        Initialize UIA wrapper.
+        初始化 UIA 封装器。
 
         Args:
-            hwnd: Optional window handle to bind
+            hwnd: 可选的窗口句柄
         """
         self._root: uia.WindowControl = None
         if hwnd:
@@ -26,39 +26,39 @@ class UIAWrapper:
 
     def bind(self, hwnd: int) -> None:
         """
-        Bind to a window by handle.
+        通过窗口句柄绑定。
 
         Args:
-            hwnd: Window handle
+            hwnd: 窗口句柄
         """
         self._root = uia.ControlFromHandle(hwnd)
         if not self._root:
-            raise ControlNotFoundError(f"Cannot get UIAutomation control from handle {hwnd}")
-        logger.debug(f"Bound to window: {self._root.Name}")
+            raise ControlNotFoundError(f"无法从句柄 {hwnd} 获取 UIAutomation 控件")
+        logger.debug(f"已绑定窗口: {self._root.Name}")
 
     @property
     def root(self) -> uia.WindowControl:
-        """Get root control"""
+        """获取根控件"""
         return self._root
 
     def find_control(self, control_type: str = None, name: str = None,
                      class_name: str = None, automation_id: str = None,
                      timeout: float = None) -> uia.Control:
         """
-        Find a control by attributes.
+        按属性查找控件。
 
         Args:
-            control_type: Control type (Button, Edit, etc.)
-            name: Control name
-            class_name: Control class name
-            automation_id: Automation ID
-            timeout: Search timeout in seconds
+            control_type: 控件类型（Button、Edit 等）
+            name: 控件名称
+            class_name: 控件类名
+            automation_id: 自动化 ID
+            timeout: 搜索超时时间（秒）
 
         Returns:
-            Control if found
+            找到的控件
 
         Raises:
-            ControlNotFoundError: If control not found
+            ControlNotFoundError: 控件未找到时抛出
         """
         timeout = timeout or SEARCH_TIMEOUT
         kwargs = {'searchDepth': 10}
@@ -70,7 +70,7 @@ class UIAWrapper:
         if automation_id:
             kwargs['AutomationId'] = automation_id
 
-        # Get control by type
+        # 按类型获取控件
         control_type = control_type or 'Control'
         getter = getattr(self._root, f'{control_type}Control', None)
         if not getter:
@@ -81,20 +81,20 @@ class UIAWrapper:
             return ctrl
 
         raise ControlNotFoundError(
-            f"Control not found: type={control_type}, name={name}, "
+            f"控件未找到: type={control_type}, name={name}, "
             f"class={class_name}, id={automation_id}"
         )
 
     def find_all_controls(self, control_type: str = None, **kwargs) -> list:
         """
-        Find all matching controls.
+        查找所有匹配的控件。
 
         Args:
-            control_type: Control type
-            **kwargs: Additional filter arguments
+            control_type: 控件类型
+            **kwargs: 其他筛选参数
 
         Returns:
-            List of controls
+            控件列表
         """
         getter = getattr(self._root, f'{control_type}Control', self._root.Control)
         ctrl = getter(searchDepth=10, **kwargs)
@@ -102,37 +102,37 @@ class UIAWrapper:
 
     def click(self, control: uia.Control) -> bool:
         """
-        Click a control.
+        点击控件。
 
         Args:
-            control: Control to click
+            control: 要点击的控件
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         try:
             control.Click()
-            logger.debug(f"Clicked control: {control.Name}")
+            logger.debug(f"已点击控件: {control.Name}")
             return True
         except Exception as e:
-            logger.error(f"Failed to click control: {e}")
+            logger.error(f"点击控件失败: {e}")
             return False
 
     def send_keys(self, control: uia.Control, text: str) -> bool:
         """
-        Send keys to a control.
+        向控件发送按键。
 
         Args:
-            control: Target control
-            text: Text to send
+            control: 目标控件
+            text: 要发送的文本
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         try:
             control.SendKeys(text)
-            logger.debug(f"Sent keys to control: {text[:20]}...")
+            logger.debug(f"已发送按键到控件: {text[:20]}...")
             return True
         except Exception as e:
-            logger.error(f"Failed to send keys: {e}")
+            logger.error(f"发送按键失败: {e}")
             return False

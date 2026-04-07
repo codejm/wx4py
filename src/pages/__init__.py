@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Pages module"""
+"""页面模块"""
 
 from .base import BasePage
 from .chat_window import ChatWindow, SearchResult

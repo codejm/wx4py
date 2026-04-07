@@ -1,36 +1,36 @@
 # -*- coding: utf-8 -*-
-"""Base page class for WeChat UI pages"""
+"""微信 UI 页面基类"""
 import time
 from ..config import OPERATION_INTERVAL
 
 
 class BasePage:
-    """Base class for page objects"""
+    """页面对象基类"""
 
     def __init__(self, window):
         """
-        Initialize base page.
+        初始化基础页面。
 
         Args:
-            window: WeChatWindow instance
+            window: WeChatWindow 实例
         """
         self._window = window
 
     @property
     def uia(self):
-        """Get UIAutomation wrapper"""
+        """获取 UIAutomation 封装器"""
         return self._window.uia
 
     @property
     def root(self):
-        """Get root control"""
+        """获取根控件"""
         return self._window.uia.root
 
     def wait(self, seconds: float = None):
-        """Wait for a moment"""
+        """等待指定时间"""
         time.sleep(seconds or OPERATION_INTERVAL)
         return self
 
     def find_control(self, control_type: str = None, **kwargs):
-        """Find a control"""
+        """查找控件"""
         return self.uia.find_control(control_type, **kwargs)

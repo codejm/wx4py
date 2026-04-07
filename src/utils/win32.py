@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Win32 API utilities"""
+"""Win32 API 工具"""
+import ctypes
+import ctypes.wintypes
 import time
 import os
 import subprocess
@@ -8,25 +10,58 @@ import win32gui
 import win32con
 import win32process
 import winreg
+from typing import List, Optional, Tuple
 
 from ..core.exceptions import RegistryError
 
 
-def check_and_fix_registry() -> bool:
+def ensure_screen_reader_flag() -> bool:
     """
-    Check and fix registry for UI Automation.
+    Ensure the system-level Screen Reader flag (SPI_SETSCREENREADER) is ON.
 
-    Checks RunningState in HKCU\\SOFTWARE\\Microsoft\\Narrator\\NoRoam
-    If value is 0, sets it to 1.
+    Qt-based applications (including WeChat 4.x) check this flag at startup
+    to decide whether to expose their accessibility / UI Automation tree.
+    If the flag is OFF, Qt never creates the accessible interfaces and UIA
+    sees only the top-level HWND with an empty child tree.
 
     Returns:
-        bool: True if registry was modified, False if no change needed
+        bool: True if the flag was changed (was OFF, now ON),
+              False if it was already ON.
+    """
+    SPI_GETSCREENREADER = 0x0046
+    SPI_SETSCREENREADER = 0x0047
+    SPIF_UPDATEINIFILE = 0x01
+    SPIF_SENDCHANGE = 0x02
+
+    pvParam = ctypes.wintypes.BOOL()
+    ctypes.windll.user32.SystemParametersInfoW(
+        SPI_GETSCREENREADER, 0, ctypes.byref(pvParam), 0
+    )
+
+    if pvParam.value:
+        return False  # already active
+
+    ctypes.windll.user32.SystemParametersInfoW(
+        SPI_SETSCREENREADER, 1, 0, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
+    )
+    return True  # was off, now on
+
+
+def check_and_fix_registry() -> bool:
+    """
+    检查并修复 UI Automation 的注册表设置。
+
+    检查 HKCU\\SOFTWARE\\Microsoft\\Narrator\\NoRoam 中的 RunningState，
+    如果值为 0 则设置为 1。
+
+    Returns:
+        bool: 修改了注册表返回 True，无需修改返回 False
     """
     reg_path = r"SOFTWARE\Microsoft\Narrator\NoRoam"
     key_name = "RunningState"
 
     try:
-        # Open registry key
+        # 打开注册表键
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             reg_path,
@@ -35,11 +70,11 @@ def check_and_fix_registry() -> bool:
         )
 
         try:
-            # Try to read existing value
+            # 读取当前值
             value, _ = winreg.QueryValueEx(key, key_name)
 
             if value == 0:
-                # Set to 1
+                # 设置为 1
                 winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, 1)
                 winreg.CloseKey(key)
                 return True
@@ -48,19 +83,19 @@ def check_and_fix_registry() -> bool:
             return False
 
         except FileNotFoundError:
-            # Key doesn't exist, create it with value 1
+            # 键不存在，创建并设置为 1
             winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, 1)
             winreg.CloseKey(key)
             return True
 
     except PermissionError as e:
-        raise RegistryError(f"Permission denied accessing registry: {e}")
+        raise RegistryError(f"访问注册表时权限被拒绝: {e}")
     except Exception as e:
-        raise RegistryError(f"Failed to access registry: {e}")
+        raise RegistryError(f"访问注册表失败: {e}")
 
 
 def _get_process_image_name(pid: int) -> str:
-    """Best-effort resolve executable full path by pid."""
+    """尽力通过 pid 解析可执行文件完整路径。"""
     import ctypes
 
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -97,7 +132,7 @@ def _get_process_image_name(pid: int) -> str:
 
 
 def _wechat_window_score(hwnd: int, title: str, class_name: str, exe_path: str) -> int:
-    """Score a candidate top-level window; higher means more likely main WeChat."""
+    """为候选的顶层窗口评分；分数越高越可能是微信主窗口。"""
     score = 0
     exe_name = os.path.basename(exe_path).lower()
 
@@ -117,23 +152,23 @@ def _wechat_window_score(hwnd: int, title: str, class_name: str, exe_path: str) 
     return score
 
 
-def find_wechat_window() -> int | None:
+def find_wechat_window() -> Optional[int]:
     """
-    Find WeChat main window handle.
+    查找微信主窗口句柄。
 
-    Avoid selecting WeChatAppEx (white screen helper window) when both
-    helper and main Weixin window are present.
+    当 WeChatAppEx（白屏辅助窗口）和主窗口同时存在时，
+    避免选择错误的窗口。
 
     Returns:
-        int | None: Window handle or None if not found
+        Optional[int]: 窗口句柄，未找到时返回 None
     """
-    candidates: list[tuple[int, int, str, str, str]] = []
+    candidates: List[Tuple[int, int, str, str, str]] = []
 
     def _enum_cb(hwnd, _):
         title = win32gui.GetWindowText(hwnd) or ""
         class_name = win32gui.GetClassName(hwnd) or ""
 
-        # Quick prefilter to reduce process lookups
+        # 快速预筛选以减少进程查询
         if ("微信" not in title) and (not class_name.startswith("Qt")) and ("WeChat" not in class_name):
             return True
 
@@ -155,7 +190,7 @@ def find_wechat_window() -> int | None:
         candidates.sort(key=lambda x: x[0], reverse=True)
         return candidates[0][1]
 
-    # Legacy fallback
+    # 历史兼容回退
     hwnd = win32gui.FindWindow('Qt51514QWindowIcon', None)
     if hwnd:
         return hwnd
@@ -169,13 +204,13 @@ def find_wechat_window() -> int | None:
 
 def restart_wechat_process(hwnd: int) -> bool:
     """
-    Restart WeChat process for a specific window handle.
+    重启指定窗口句柄对应的微信进程。
 
     Args:
-        hwnd: WeChat window handle
+        hwnd: 微信窗口句柄
 
     Returns:
-        bool: True if restart command succeeded
+        bool: 重启命令执行成功返回 True
     """
     try:
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
@@ -183,7 +218,7 @@ def restart_wechat_process(hwnd: int) -> bool:
         if not exe_path or not os.path.exists(exe_path):
             return False
 
-        # Terminate current process tree
+        # 结束当前进程树
         subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             capture_output=True,
@@ -193,7 +228,7 @@ def restart_wechat_process(hwnd: int) -> bool:
         )
         time.sleep(1.0)
 
-        # Relaunch WeChat executable
+        # 重新启动微信可执行文件
         subprocess.Popen([exe_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1.0)
         return True
@@ -203,18 +238,18 @@ def restart_wechat_process(hwnd: int) -> bool:
 
 def bring_window_to_front(hwnd: int) -> bool:
     """
-    Bring window to front and restore if minimized.
+    将窗口置于前台，如果已最小化则恢复。
 
     Args:
-        hwnd: Window handle
+        hwnd: 窗口句柄
 
     Returns:
-        bool: True if successful
+        bool: 成功时返回 True
     """
     try:
-        # Show window
+        # 显示窗口
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        # Bring to front
+        # 置于前台
         win32gui.SetForegroundWindow(hwnd)
         return True
     except Exception:
@@ -222,15 +257,15 @@ def bring_window_to_front(hwnd: int) -> bool:
 
 
 def get_window_title(hwnd: int) -> str:
-    """Get window title by handle"""
+    """通过句柄获取窗口标题"""
     return win32gui.GetWindowText(hwnd)
 
 
 def get_window_class(hwnd: int) -> str:
-    """Get window class name by handle"""
+    """通过句柄获取窗口类名"""
     return win32gui.GetClassName(hwnd)
 
 
 def is_window_visible(hwnd: int) -> bool:
-    """Check if window is visible"""
+    """检查窗口是否可见"""
     return win32gui.IsWindowVisible(hwnd) != 0
