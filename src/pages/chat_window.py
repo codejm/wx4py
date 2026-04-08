@@ -302,7 +302,7 @@ class ChatWindow(BasePage):
         self._log_send_phase(request.target, attempt, phase, True, started_at)
         return True
 
-    def _send_once(self, request: SendRequest, attempt: int) -> bool:
+    def _send_once(self, request: SendRequest, attempt: int, minimize_window: bool = True) -> bool:
         """执行一次完整的发送尝试。"""
         self._sleep_before_send_attempt()
 
@@ -320,7 +320,7 @@ class ChatWindow(BasePage):
                 request,
                 attempt,
                 "send",
-                lambda: self.send_message(request.message),
+                lambda: self.send_message(request.message, minimize_window=minimize_window),
                 "failed to send message",
             )
         except TargetNotFoundError as exc:
@@ -338,23 +338,23 @@ class ChatWindow(BasePage):
         return True
 
     def _send_with_retry_range(
-        self, request: SendRequest, attempts: range
+        self, request: SendRequest, attempts: range, minimize_window: bool = True
     ) -> bool:
         """在当前 UIA 会话中执行一系列发送尝试。"""
         attempt_list = list(attempts)
 
         for index, attempt in enumerate(attempt_list):
-            if self._send_once(request, attempt):
+            if self._send_once(request, attempt, minimize_window=minimize_window):
                 return True
             if index < len(attempt_list) - 1:
                 self._sleep_before_send_retry()
 
         return False
 
-    def _send_with_reconnect_fallback(self, request: SendRequest) -> bool:
+    def _send_with_reconnect_fallback(self, request: SendRequest, minimize_window: bool = True) -> bool:
         """先执行常规发送重试，失败后重建 UIA 会话再重试。"""
         initial_attempts = range(1, SEND_RETRY_COUNT + 1)
-        if self._send_with_retry_range(request, initial_attempts):
+        if self._send_with_retry_range(request, initial_attempts, minimize_window=minimize_window):
             return True
 
         if SEND_RECONNECT_RETRY_COUNT <= 0:
@@ -365,7 +365,7 @@ class ChatWindow(BasePage):
             SEND_RETRY_COUNT + 1,
             SEND_RETRY_COUNT + SEND_RECONNECT_RETRY_COUNT + 1,
         )
-        return self._send_with_retry_range(request, reconnect_attempts)
+        return self._send_with_retry_range(request, reconnect_attempts, minimize_window=minimize_window)
 
     def _open_chat_with_status(self, target: str, target_type: str = 'contact') -> bool:
         """打开聊天并保留 TargetNotFoundError，用于发送工作流控制。"""
@@ -914,12 +914,13 @@ class ChatWindow(BasePage):
         self._clear_search()
         return False
 
-    def send_message(self, message: str) -> bool:
+    def send_message(self, message: str, minimize_window: bool = True) -> bool:
         """
         在当前聊天中发送消息。
 
         Args:
             message: 要发送的消息
+            minimize_window: 发送完成后是否缩小窗口
 
         Returns:
             bool: 成功时返回 True
@@ -948,10 +949,17 @@ class ChatWindow(BasePage):
         time.sleep(0.3)
 
         logger.info("消息已发送")
-        self._minimize_window()
+        if minimize_window:
+            self._minimize_window()
         return True
 
-    def send_to(self, target: str, message: str, target_type: str = 'contact') -> bool:
+    def send_to(
+        self,
+        target: str,
+        message: str,
+        target_type: str = 'contact',
+        minimize_window: bool = True,
+    ) -> bool:
         """
         打开聊天并发送消息。
 
@@ -959,6 +967,7 @@ class ChatWindow(BasePage):
             target: 联系人或群名称
             message: 要发送的消息
             target_type: 'contact' 或 'group'
+            minimize_window: 发送完成后是否缩小窗口
 
         Returns:
             bool: 成功时返回 True
@@ -972,7 +981,7 @@ class ChatWindow(BasePage):
             return True
 
         try:
-            if self._send_with_reconnect_fallback(request):
+            if self._send_with_reconnect_fallback(request, minimize_window=minimize_window):
                 return True
         except TargetNotFoundError:
             logger.error(f"未找到目标聊天: '{request.target}'")
@@ -999,7 +1008,12 @@ class ChatWindow(BasePage):
 
         results = {}
         for target in targets:
-            success = self.send_to(target, normalized_message, target_type)
+            success = self.send_to(
+                target,
+                normalized_message,
+                target_type,
+                minimize_window=False,
+            )
             results[target] = success
             self._sleep_between_batch_targets()
 
