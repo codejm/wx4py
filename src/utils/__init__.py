@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Utilities module"""
+"""工具模块"""
 
 from .logger import get_logger
 from .win32 import (

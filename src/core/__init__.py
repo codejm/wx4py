@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Core module - window management and UIAutomation wrapper"""
+"""核心模块 - 窗口管理与 UIAutomation 封装"""
 
 from .window import WeChatWindow
 from .uia_wrapper import UIAWrapper

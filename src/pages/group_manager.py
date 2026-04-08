@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Group management functionality for WeChat"""
+"""微信群组管理功能"""
 import time
 import win32gui
 import win32api
@@ -15,31 +15,31 @@ logger = get_logger(__name__)
 
 class GroupManager(BasePage):
     """
-    Group management operations.
+    群组管理操作。
 
-    Usage:
+    用法:
         wx = WeChatClient()
         wx.connect()
 
-        # Modify group announcement
+        # 修改群公告
         wx.group_manager.modify_announcement("测试群", "新公告内容")
     """
 
-    # Relative position ratios for "完成" button in announcement popup
-    COMPLETE_BTN_X_RATIO = 0.90  # 90% from left edge
-    COMPLETE_BTN_Y_RATIO = 0.09  # 9% from top edge (below title bar)
+    # 群公告弹窗中"完成"按钮的相对位置比例
+    COMPLETE_BTN_X_RATIO = 0.90  # 距左边缘 90%
+    COMPLETE_BTN_Y_RATIO = 0.09  # 距顶部边缘 9%（标题栏下方）
 
     def __init__(self, window):
         super().__init__(window)
 
     def _press_key(self, key_code: int, hold_time: float = 0.1) -> None:
-        """Press and release a virtual key once."""
+        """按下并释放一个虚拟按键。"""
         win32api.keybd_event(key_code, 0, 0, 0)
         time.sleep(hold_time)
         win32api.keybd_event(key_code, 0, win32con.KEYEVENTF_KEYUP, 0)
 
     def _send_ctrl_combo(self, key_code: int, settle_time: float = 0.3) -> None:
-        """Send Ctrl+<key> and wait briefly for UI updates."""
+        """发送 Ctrl+<key> 组合键并短暂等待 UI 更新。"""
         win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
         time.sleep(0.05)
         win32api.keybd_event(key_code, 0, 0, 0)
@@ -50,7 +50,7 @@ class GroupManager(BasePage):
         time.sleep(settle_time)
 
     def _walk_controls(self, root, max_depth: int = 20) -> list:
-        """Collect a control tree defensively."""
+        """防御性地收集控件树。"""
         results = []
 
         def _visit(ctrl, depth: int) -> None:
@@ -67,7 +67,7 @@ class GroupManager(BasePage):
         return results
 
     def _focus_control_center(self, ctrl) -> None:
-        """Focus a popup by clicking its center point."""
+        """通过点击中心点来聚焦弹窗。"""
         rect = ctrl.BoundingRectangle
         if not rect:
             return
@@ -77,26 +77,39 @@ class GroupManager(BasePage):
         time.sleep(0.3)
 
     def _open_group_chat(self, group_name: str) -> bool:
-        """Open a group chat with consistent logging."""
+        """打开群聊，使用统一的日志记录。"""
         from .chat_window import ChatWindow
 
         chat_window = ChatWindow(self._window)
         if not chat_window.open_chat(group_name, target_type='group'):
-            logger.error(f"Failed to open group: {group_name}")
+            logger.error(f"打开群聊失败: {group_name}")
             return False
         time.sleep(1)
         return True
 
     def _get_group_detail_view(self, timeout: float = 2):
-        """Get the group detail panel if present."""
-        info_view = self.root.GroupControl(ClassName='mmui::ChatRoomMemberInfoView')
-        if not info_view.Exists(maxSearchSeconds=timeout):
-            logger.error("ChatRoomMemberInfoView not found")
-            return None
-        return info_view
+        """获取群详情面板（如果存在）。"""
+        # 尝试多个可能的类名以兼容不同微信版本
+        possible_class_names = [
+            'mmui::ChatRoomMemberInfoView',
+            'mmui::GroupInfoView',
+            'mmui::ChatRoomInfoView',
+            'mmui::XGroupDetailPanel',
+        ]
+
+        for class_name in possible_class_names:
+            try:
+                info_view = self.root.GroupControl(ClassName=class_name)
+                if info_view.Exists(maxSearchSeconds=0.5):
+                    return info_view
+            except Exception:
+                continue
+
+        logger.error("未找到 ChatRoomMemberInfoView")
+        return None
 
     def _open_and_focus_group_detail(self, group_name: str):
-        """Open a group chat, show its detail panel, and focus the panel."""
+        """打开群聊、显示详情面板并聚焦该面板。"""
         if not self._open_group_chat(group_name):
             return None
         if not self._open_group_detail():
@@ -111,7 +124,7 @@ class GroupManager(BasePage):
         return info_view
 
     def _find_button_with_deadline(self, button_name: str, timeout: float = 3.0):
-        """Poll for a button in the main window until timeout."""
+        """在主窗口中轮询查找按钮直到超时。"""
         deadline = time.time() + timeout
         while time.time() < deadline:
             button = self.root.ButtonControl(Name=button_name)
@@ -121,15 +134,43 @@ class GroupManager(BasePage):
         return None
 
     def _get_member_list(self):
-        """Get the group member list control if present."""
-        member_list = self.root.ListControl(AutomationId='chat_member_list')
-        if not member_list.Exists(maxSearchSeconds=2):
-            logger.error("chat_member_list not found")
-            return None
-        return member_list
+        """获取群成员列表控件（如果存在）。"""
+        # 尝试多个可能的 AutomationId 以兼容不同微信版本
+        possible_ids = ['chat_member_list', 'member_list', 'group_member_list', 'list']
+        possible_class_names = ['mmui::QFReuseGridWidget', 'mmui::XListView', 'mmui::XListWidget']
+
+        # 先按 AutomationId 查找
+        for auto_id in possible_ids:
+            try:
+                member_list = self.root.ListControl(AutomationId=auto_id)
+                if member_list.Exists(maxSearchSeconds=0.5):
+                    return member_list
+            except Exception:
+                continue
+
+        # 按 ClassName 查找
+        for class_name in possible_class_names:
+            try:
+                member_list = self.root.ListControl(ClassName=class_name)
+                if member_list.Exists(maxSearchSeconds=0.5):
+                    return member_list
+            except Exception:
+                continue
+
+        # 最后兜底：在群详情区域查找任意 ListControl
+        try:
+            children = self.root.GetChildren()
+            for ctrl in children:
+                if ctrl.ControlTypeName == 'ListControl':
+                    return ctrl
+        except Exception:
+            pass
+
+        logger.error("未找到 chat_member_list")
+        return None
 
     def _scroll_list(self, ctrl, delta: int, steps: int, step_delay: float, settle_time: float) -> None:
-        """Scroll a list-like control by mouse wheel."""
+        """通过鼠标滚轮滚动列表控件。"""
         rect = ctrl.BoundingRectangle
         cx = (rect.left + rect.right) // 2
         cy = (rect.top + rect.bottom) // 2
@@ -140,7 +181,7 @@ class GroupManager(BasePage):
         time.sleep(settle_time)
 
     def _find_announcement_window(self) -> Optional[dict]:
-        """Find announcement popup window"""
+        """查找群公告弹窗。"""
         windows = []
 
         def enum_callback(hwnd, results):
@@ -152,22 +193,22 @@ class GroupManager(BasePage):
         return windows[0] if windows else None
 
     def _get_announcement_popup(self):
-        """Get the announcement popup control and hwnd after opening the panel."""
+        """打开面板后获取群公告弹窗控件和 hwnd。"""
         popup_info = self._find_announcement_window()
         if not popup_info:
-            logger.error("Announcement popup not found")
+            logger.error("未找到群公告弹窗")
             return None, None
 
         hwnd = popup_info['hwnd']
         popup = control_from_handle(hwnd)
         if not popup:
-            logger.error("Could not get announcement popup control")
+            logger.error("无法获取群公告弹窗控件")
             return None, None
         return popup, hwnd
 
     def _click_at_position(self, x: int, y: int):
-        """Click at screen coordinates"""
-        logger.debug(f"Click at screen position ({x}, {y})")
+        """在屏幕坐标处点击。"""
+        logger.debug(f"在屏幕位置 ({x}, {y}) 点击")
         win32api.SetCursorPos((x, y))
         time.sleep(0.2)
         win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
@@ -176,67 +217,66 @@ class GroupManager(BasePage):
 
     def _find_and_activate_button(self, popup, button_name: str) -> bool:
         """
-        Find a button by Tab navigation and activate it with Enter key.
+        通过 Tab 导航查找按钮并用 Enter 键激活。
 
         Args:
-            popup: The popup control
-            button_name: Name of the button to find (e.g., '完成', '编辑群公告', '发布')
+            popup: 弹窗控件
+            button_name: 要查找的按钮名称（如 '完成'、'编辑群公告'、'发布'）
 
         Returns:
-            bool: True if button found and activated
+            bool: 找到并激活按钮时返回 True
         """
-        logger.info(f"Looking for '{button_name}' button via Tab navigation...")
+        logger.info(f"通过 Tab 导航查找 '{button_name}' 按钮...")
 
-        # Focus popup
+        # 聚焦弹窗
         self._focus_control_center(popup)
         time.sleep(0.2)
 
-        # Tab through controls to find the button
+        # 通过 Tab 遍历控件查找目标按钮
         for tab_count in range(20):
             self._press_key(win32con.VK_TAB, hold_time=0.15)
             time.sleep(0.3)
 
-            # Check if target button is now visible
+            # 检查目标按钮是否已可见
             all_controls = self._walk_controls(popup)
 
             for ctrl in all_controls:
                 if ctrl.Name == button_name:
-                    logger.info(f"Found '{button_name}' button at Tab #{tab_count + 1}")
+                    logger.info(f"在第 {tab_count + 1} 次 Tab 找到 '{button_name}' 按钮")
 
-                    # Try both Space and Enter to activate it
+                    # 尝试 Space 和 Enter 两种方式激活
                     for key_name, key_code in [("Space", win32con.VK_SPACE), ("Return", win32con.VK_RETURN)]:
-                        logger.info(f"Pressing {key_name} to activate '{button_name}'...")
+                        logger.info(f"按 {key_name} 激活 '{button_name}'...")
                         self._press_key(key_code)
                         time.sleep(0.5)
 
                     time.sleep(1)
                     return True
 
-        logger.error(f"Could not find '{button_name}' button")
+        logger.error(f"未找到 '{button_name}' 按钮")
         return False
 
     def get_group_members(self, group_name: str) -> list:
         """
-        Get all members of a group chat.
+        获取群聊的所有成员。
 
-        Clicks 聊天信息 to open the detail panel, triggers 查看更多 (if present)
-        via Tab navigation to expand the full member list, then scrolls through
-        the QFReuseGridWidget to collect all visible members.
+        点击"聊天信息"打开详情面板，通过 Tab 导航触发"查看更多"（如果存在）
+        以展开完整成员列表，然后滚动 QFReuseGridWidget 收集所有可见成员。
 
         Args:
-            group_name: Name of the group
+            group_name: 群名称
 
         Returns:
-            list[str]: Member display names (昵称 or 备注名)
+            list[str]: 成员显示名称（昵称或备注名）
         """
-        logger.info(f"Getting members for group: {group_name}")
+        logger.info(f"获取群成员: {group_name}")
 
-        # Step 1: Open group detail panel and focus it
+        # 第1步：打开群详情面板并聚焦
         info_view = self._open_and_focus_group_detail(group_name)
         if not info_view:
             return []
 
-        # Step 2: Tab to 查看更多 (virtualized, FindFirst won't work)
+        # 第2步：Tab 导航到"查看更多"（虚拟化控件，FindFirst 无法直接查找）
         for i in range(10):
             self._press_key(win32con.VK_TAB, hold_time=0.05)
             time.sleep(0.3)
@@ -249,12 +289,12 @@ class GroupManager(BasePage):
         else:
             logger.info("查看更多 not found, collecting visible members only")
 
-        # Step 3: Find member list by AutomationId (works after expand too)
+        # 第3步：通过 AutomationId 查找成员列表（展开后同样有效）
         member_list = self._get_member_list()
         if not member_list:
             return []
 
-        # Step 4: Scroll and collect all members
+        # 第4步：滚动并收集所有成员
         self._scroll_list(member_list, delta=120 * 3, steps=10, step_delay=0.1, settle_time=0.5)
 
         all_members = set()
@@ -277,36 +317,61 @@ class GroupManager(BasePage):
             else:
                 no_new_count += 1
 
-            # Scroll one row at a time and wait for Qt to render
+            # 每次滚动一行，等待 Qt 渲染
             self._scroll_list(member_list, delta=-120, steps=1, step_delay=0.0, settle_time=0.6)
 
         members = sorted(all_members)
-        logger.info(f"Collected {len(members)} members from group: {group_name}")
+        logger.info(f"从群 {group_name} 收集到 {len(members)} 名成员")
         return members
 
     def _open_group_detail(self) -> bool:
-        """Open group detail panel"""
-        info_btn = self.root.ButtonControl(Name='聊天信息')
-        if not info_btn.Exists(maxSearchSeconds=2):
+        """打开群详情面板。"""
+        # 尝试多个可能的按钮名称以兼容不同微信版本
+        possible_names = ['聊天信息', '群聊信息', '信息', '详情']
+
+        info_btn = None
+        for name in possible_names:
+            try:
+                btn = self.root.ButtonControl(Name=name)
+                if btn.Exists(maxSearchSeconds=0.5):
+                    info_btn = btn
+                    break
+            except Exception:
+                continue
+
+        if not info_btn:
             logger.error("聊天信息 button not found")
             return False
 
-        info_btn.Click()
-        time.sleep(2)
+        try:
+            info_btn.Click(simulateMove=False)
+        except Exception as e:
+            logger.debug(f"Click 点击失败，尝试 SetFocus: {e}")
+            try:
+                info_btn.SetFocus()
+                import win32con
+                win32api.keybd_event(win32con.VK_RETURN, 0, 0, 0)
+                time.sleep(0.05)
+                win32api.keybd_event(win32con.VK_RETURN, 0, win32con.KEYEVENTF_KEYUP, 0)
+            except Exception as e2:
+                logger.error(f"打开群详情失败: {e2}")
+                return False
+
+        time.sleep(1.5)
         return True
 
     def _click_announcement_button(self) -> bool:
-        """Click announcement button in group detail panel using Tab navigation"""
+        """通过 Tab 导航点击群详情面板中的群公告按钮。"""
         info_view = self._get_group_detail_view(timeout=2)
         if not info_view:
             return False
 
-        # Focus the panel without clicking (avoids triggering child controls)
+        # 聚焦面板但不点击（避免触发子控件）
         info_view.SetFocus()
         time.sleep(0.3)
 
-        # Use Tab navigation + GetFocusedControl to find "群公告" button
-        logger.info("Looking for '群公告' button via Tab navigation...")
+        # 使用 Tab 导航 + GetFocusedControl 查找"群公告"按钮
+        logger.info("通过 Tab 导航查找'群公告'按钮...")
 
         for tab_count in range(30):
             self._press_key(win32con.VK_TAB, hold_time=0.05)
@@ -318,72 +383,113 @@ class GroupManager(BasePage):
 
             name = focused.Name or ""
             if "群公告" in name:
-                logger.info(f"Found '群公告' at Tab #{tab_count + 1}")
+                logger.info(f"在第 {tab_count + 1} 次 Tab 找到'群公告'")
                 self._press_key(win32con.VK_RETURN)
                 time.sleep(2)
                 return True
 
-        logger.error("Could not find '群公告' button")
+        logger.error("未找到'群公告'按钮")
         return False
 
     def _click_edit_button(self, popup) -> bool:
-        """Click '编辑群公告' button if existing announcement is shown.
+        """点击'编辑群公告'按钮（如果显示了已有公告）。
 
-        Uses Tab navigation to find and Enter to activate the button.
+        使用 Tab 导航查找并用 Enter 激活按钮。
         """
-        # First, check if we're already in edit mode (wide edit box)
-        edit = popup.EditControl(AutomationId='xeditorInputId')
-        if edit and edit.Exists(maxSearchSeconds=1):
-            rect = edit.BoundingRectangle
-            if rect and (rect.right - rect.left) > 50:
-                logger.debug("Already in edit mode")
-                return True
+        # 首先检查是否已在编辑模式（宽编辑框）
+        possible_ids = ['xeditorInputId', 'announcement_input', 'edit_input', 'input_field']
+        in_edit_mode = False
 
-        # Use Tab + Enter to activate edit button
+        for auto_id in possible_ids:
+            try:
+                edit = popup.EditControl(AutomationId=auto_id)
+                if edit.Exists(maxSearchSeconds=0.3):
+                    rect = edit.BoundingRectangle
+                    if rect and (rect.right - rect.left) > 50:
+                        logger.debug("已处于编辑模式")
+                        in_edit_mode = True
+                        break
+            except Exception:
+                continue
+
+        if in_edit_mode:
+            return True
+
+        # 使用 Tab + Enter 激活编辑按钮
         return self._find_and_activate_button(popup, '编辑群公告')
 
     def _input_announcement_content(self, popup, content: str = None, paste_from_clipboard: bool = False) -> bool:
-        """Input announcement content into edit field using clipboard paste
+        """将公告内容输入到编辑字段中（通过剪贴板粘贴）。
 
         Args:
-            popup: The popup control
-            content: Text content to paste (ignored if paste_from_clipboard is True)
-            paste_from_clipboard: If True, paste directly from current clipboard content
+            popup: 弹窗控件
+            content: 要粘贴的文本内容（paste_from_clipboard 为 True 时忽略）
+            paste_from_clipboard: 为 True 时直接从当前剪贴板内容粘贴
         """
-        edit = popup.EditControl(AutomationId='xeditorInputId')
-        if not edit.Exists(maxSearchSeconds=2):
-            logger.error("Announcement edit field not found")
+        # 尝试多个可能的 AutomationId 以兼容不同微信版本
+        possible_ids = ['xeditorInputId', 'announcement_input', 'edit_input', 'input_field']
+        possible_class_names = ['mmui::XTextEdit', 'mmui::XValidatorTextEdit', 'mmui::XEditEx']
+
+        edit = None
+        for auto_id in possible_ids:
+            try:
+                e = popup.EditControl(AutomationId=auto_id)
+                if e.Exists(maxSearchSeconds=0.5):
+                    edit = e
+                    break
+            except Exception:
+                continue
+
+        if not edit:
+            for class_name in possible_class_names:
+                try:
+                    e = popup.EditControl(ClassName=class_name)
+                    if e.Exists(maxSearchSeconds=0.5):
+                        edit = e
+                        break
+                except Exception:
+                    continue
+
+        if not edit:
+            logger.error("未找到公告编辑字段")
             return False
 
-        edit.Click()
-        time.sleep(0.5)
+        try:
+            edit.Click(simulateMove=False)
+        except Exception:
+            try:
+                edit.SetFocus()
+            except Exception:
+                pass
 
-        self._send_ctrl_combo(0x41, settle_time=0.3)
+        time.sleep(0.3)
 
-        # Copy content to clipboard (unless pasting from existing clipboard)
+        self._send_ctrl_combo(0x41, settle_time=0.2)
+
+        # 将内容复制到剪贴板（除非直接从已有剪贴板粘贴）
         if not paste_from_clipboard and content:
             import pyperclip
             pyperclip.copy(content)
-            time.sleep(0.2)
+            time.sleep(0.15)
 
-        self._send_ctrl_combo(0x56, settle_time=0.5)
+        self._send_ctrl_combo(0x56, settle_time=0.4)
 
         return True
 
     def _click_complete_button(self, hwnd: int) -> bool:
-        """Click '完成' button in announcement popup using Tab + Enter"""
+        """通过 Tab + Enter 点击群公告弹窗中的'完成'按钮。"""
         popup = control_from_handle(hwnd)
 
         if not popup:
-            logger.error("Could not get popup control for complete button")
+            logger.error("无法获取弹窗控件以点击完成按钮")
             return False
 
-        # Use Tab + Enter to activate complete button
+        # 使用 Tab + Enter 激活完成按钮
         return self._find_and_activate_button(popup, '完成')
 
     def _click_publish_button(self, popup) -> bool:
-        """Click '发布' button in confirm dialog"""
-        # Find '取消' button first
+        """点击确认对话框中的'发布'按钮。"""
+        # 先查找'取消'按钮
         all_controls = self._walk_controls(popup, max_depth=15)
 
         cancel_btn = None
@@ -395,24 +501,24 @@ class GroupManager(BasePage):
                 break
 
         if not cancel_btn:
-            logger.error("Confirm dialog not found")
+            logger.error("未找到确认对话框")
             return False
 
         rect = cancel_btn.BoundingRectangle
         btn_width = rect.right - rect.left
         gap = 20
 
-        # '发布' button is to the right of '取消'
+        # '发布'按钮在'取消'按钮右侧
         publish_x = rect.right + gap + btn_width // 2
         publish_y = (rect.top + rect.bottom) // 2
 
-        logger.debug(f"Clicking '发布' at ({publish_x}, {publish_y})")
+        logger.debug(f"点击'发布'按钮位置 ({publish_x}, {publish_y})")
         self._click_at_position(publish_x, publish_y)
         time.sleep(2)
         return True
 
     def _has_existing_announcement(self, popup, max_tabs: int = 15) -> bool:
-        """Detect whether the popup exposes an existing announcement edit action."""
+        """检测弹窗中是否存在已有公告的编辑操作。"""
         self._focus_control_center(popup)
 
         for _ in range(max_tabs):
@@ -425,66 +531,67 @@ class GroupManager(BasePage):
 
     def modify_announcement_simple(self, group_name: str, announcement: str = None, paste_from_clipboard: bool = False) -> bool:
         """
-        Simple announcement modification.
+        简单的群公告修改。
 
-        If group has no announcement yet: direct input, complete, publish
-        If group has existing announcement: trigger edit button, input, complete, publish
+        如果群还没有公告：直接输入 → 完成 → 发布
+        如果群已有公告：触发编辑按钮 → 输入 → 完成 → 发布
 
-        Usage:
+        用法:
             wx.group_manager.modify_announcement_simple("群名", "新公告内容")
         """
-        logger.info(f"Modifying announcement for group: {group_name}")
+        logger.info(f"修改群公告: {group_name}")
 
-        # Step 1: Open and focus the group detail panel
+        # 第1步：打开并聚焦群详情面板
         if not self._open_and_focus_group_detail(group_name):
             return False
 
-        # Step 2: Click announcement button
+        # 第2步：点击群公告按钮
         if not self._click_announcement_button():
             return False
 
-        # Step 3: Find announcement popup
+        # 第3步：查找群公告弹窗
         popup, hwnd = self._get_announcement_popup()
         if not popup:
             return False
 
-        # Step 4: Check if there's existing content by Tab navigation
+        # 第4步：通过 Tab 导航检查是否有已有内容
         has_existing_content = self._has_existing_announcement(popup)
 
-        logger.info(f"Has existing content: {has_existing_content}")
+        logger.info(f"是否有已有内容: {has_existing_content}")
 
-        # Step 5: If there's existing content, trigger edit button first
+        # 第5步：如果有已有内容，先触发编辑按钮
         if has_existing_content:
-            logger.info("Triggering edit button for existing announcement...")
-            # Edit button is already visible from Tab navigation, just press Enter to activate
+            logger.info("触发编辑按钮处理已有公告...")
+            # Tab 导航已找到编辑按钮，直接按 Enter 激活
             self._press_key(win32con.VK_RETURN)
             time.sleep(1)
 
-        # Step 6: Input announcement content
+        # 第6步：输入公告内容
         if not self._input_announcement_content(popup, announcement, paste_from_clipboard):
             return False
 
-        # Step 7: Click "完成" button
+        # 第7步：点击"完成"按钮
         if not self._click_complete_button(hwnd):
             return False
 
-        # Step 8: Click "发布" button in confirm dialog
+        # 第8步：点击确认对话框中的"发布"按钮
         if not self._click_publish_button(popup):
             return False
 
-        logger.info(f"Announcement modified successfully for group: {group_name}")
+        logger.info(f"群公告修改成功: {group_name}")
+        self._minimize_window()
         return True
 
     def modify_announcement(self, group_name: str, announcement: str) -> bool:
         """
-        Modify group announcement.
+        修改群公告。
 
         Args:
-            group_name: Name of the group
-            announcement: New announcement content
+            group_name: 群名称
+            announcement: 新公告内容
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         return self.modify_announcement_simple(
             group_name=group_name,
@@ -494,19 +601,19 @@ class GroupManager(BasePage):
 
     def set_announcement_from_markdown(self, group_name: str, md_file_path: str) -> bool:
         """
-        Set group announcement from a markdown file.
+        从 Markdown 文件设置群公告。
 
-        Converts markdown to HTML and pastes it to preserve formatting.
-        Supports tables, lists, headers, and images.
+        将 Markdown 转换为 HTML 并粘贴以保留格式。
+        支持表格、列表、标题和图片。
 
         Args:
-            group_name: Name of the group
-            md_file_path: Path to the markdown file
+            group_name: 群名称
+            md_file_path: Markdown 文件路径
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
 
-        Usage:
+        用法:
             wx.group_manager.set_announcement_from_markdown(
                 "测试群",
                 "path/to/announcement.md"
@@ -518,22 +625,22 @@ class GroupManager(BasePage):
             copy_html_to_clipboard
         )
 
-        logger.info(f"Setting announcement from file: {md_file_path}")
+        logger.info(f"从文件设置群公告: {md_file_path}")
 
-        # Read markdown file
+        # 读取 Markdown 文件
         md_content = read_markdown_file(md_file_path)
 
-        # Convert to HTML
+        # 转换为 HTML
         html_content = markdown_to_html(md_content)
 
-        # Copy HTML to clipboard
+        # 将 HTML 复制到剪贴板
         if not copy_html_to_clipboard(html_content):
-            logger.error("Failed to copy HTML to clipboard")
+            logger.error("复制 HTML 到剪贴板失败")
             return False
 
-        logger.info("HTML copied to clipboard")
+        logger.info("HTML 已复制到剪贴板")
 
-        # Use paste_from_clipboard mode
+        # 使用从剪贴板粘贴模式
         return self.modify_announcement_simple(
             group_name=group_name,
             paste_from_clipboard=True
@@ -541,11 +648,11 @@ class GroupManager(BasePage):
 
     def _tab_to_control(self, target_name: str, max_tabs: int = 30):
         """
-        Tab navigate until a control with target_name has keyboard focus.
-        Uses GetFocusedControl() for accurate detection of virtualized controls.
+        通过 Tab 导航直到目标控件获得键盘焦点。
+        使用 GetFocusedControl() 精确检测虚拟化控件。
 
-        Returns the focused control if found, None otherwise.
-        Callers can use as bool: `if not self._tab_to_control(...)`.
+        找到时返回聚焦的控件，否则返回 None。
+        调用方可作为布尔值使用：`if not self._tab_to_control(...)`。
         """
         for i in range(max_tabs):
             self._press_key(win32con.VK_TAB, hold_time=0.05)
@@ -553,101 +660,102 @@ class GroupManager(BasePage):
 
             focused = GetFocusedControl()
             if focused and target_name in (focused.Name or ""):
-                logger.info(f"Found '{target_name}' at Tab #{i + 1}")
+                logger.info(f"在第 {i + 1} 次 Tab 找到 '{target_name}'")
                 return focused
 
-        logger.error(f"Could not find '{target_name}' after {max_tabs} tabs")
+        logger.error(f"经过 {max_tabs} 次 Tab 后未找到 '{target_name}'")
         return None
 
     def set_group_nickname(self, group_name: str, nickname: str) -> bool:
         """
-        Set my nickname in a group chat.
+        设置我在群聊中的昵称。
 
-        Flow:
-          1. Open group → open detail panel
-          2. Tab to '我在本群的昵称' → Enter to activate inline edit
-          3. Ctrl+A + type nickname + Enter
-          4. Click '修改' in the confirmation dialog
+        流程:
+          1. 打开群聊 → 打开详情面板
+          2. Tab 导航到'我在本群的昵称' → Enter 激活内联编辑
+          3. Ctrl+A + 输入昵称 + Enter
+          4. 点击确认对话框中的'修改'
 
         Args:
-            group_name: Name of the group
-            nickname:   New nickname to set
+            group_name: 群名称
+            nickname:   要设置的新昵称
 
         Returns:
-            bool: True if successful
+            bool: 成功时返回 True
         """
         import pyperclip
 
-        logger.info(f"Setting nickname '{nickname}' in group: {group_name}")
+        logger.info(f"设置群昵称 '{nickname}' 在群: {group_name}")
 
-        # Step 1: Open and focus the group detail panel
+        # 第1步：打开并聚焦群详情面板
         if not self._open_and_focus_group_detail(group_name):
             return False
 
-        # Step 2: Tab to "我在本群的昵称"
+        # 第2步：Tab 导航到"我在本群的昵称"
         if not self._tab_to_control('我在本群的昵称'):
             return False
 
-        # Step 3: Enter → activate inline edit
+        # 第3步：Enter → 激活内联编辑
         self._press_key(win32con.VK_RETURN)
         time.sleep(0.5)
 
-        # Step 4: Ctrl+A to select all existing text, then paste new nickname
+        # 第4步：Ctrl+A 全选已有文本，然后粘贴新昵称
         self._send_ctrl_combo(0x41, settle_time=0.2)
 
         pyperclip.copy(nickname)
         time.sleep(0.1)
         self._send_ctrl_combo(0x56, settle_time=0.3)
 
-        # Step 5: Enter → submit → triggers confirmation dialog
+        # 第5步：Enter → 提交 → 触发确认对话框
         self._press_key(win32con.VK_RETURN)
         time.sleep(1)
 
-        # Step 6: Find "修改" button in the confirmation dialog (embedded in main window)
+        # 第6步：在确认对话框中查找"修改"按钮（嵌入在主窗口中）
         confirm_btn = self._find_button_with_deadline('修改')
         if not confirm_btn:
-            logger.error("Nickname confirmation dialog not found")
+            logger.error("未找到昵称确认对话框")
             return False
 
         confirm_btn.Click()
-        logger.info(f"Nickname set to '{nickname}' successfully")
+        logger.info(f"群昵称已设置为 '{nickname}'")
         time.sleep(1)
+        self._minimize_window()
         return True
 
     def _set_toggle_in_detail_panel(self, group_name: str, control_name: str, enable: bool) -> bool:
         """
-        Open group detail panel and set a toggle switch (CheckBoxControl) by name.
+        打开群详情面板并按名称设置开关控件（CheckBoxControl）。
 
-        Used for 消息免打扰 / 置顶聊天.
-        Does nothing if the current state already matches the desired state.
+        用于 消息免打扰 / 置顶聊天。
+        如果当前状态已与目标状态一致则不执行操作。
         """
-        logger.info(f"Setting '{control_name}'={'开启' if enable else '关闭'} for group: {group_name}")
+        logger.info(f"设置 '{control_name}'={'开启' if enable else '关闭'} 群: {group_name}")
 
-        # Step 1: Open and focus the group detail panel
+        # 第1步：打开并聚焦群详情面板
         if not self._open_and_focus_group_detail(group_name):
             return False
 
-        # Step 2: Tab to the target toggle control
+        # 第2步：Tab 导航到目标开关控件
         ctrl = self._tab_to_control(control_name)
         if not ctrl:
             return False
 
-        # Step 3: Read current state
+        # 第3步：读取当前状态
         p = ctrl.GetPattern(PatternId.TogglePattern)
         if not p:
-            logger.error(f"'{control_name}' does not support TogglePattern")
+            logger.error(f"'{control_name}' 不支持 TogglePattern")
             return False
 
         current = p.ToggleState == ToggleState.On
         if current == enable:
-            logger.info(f"'{control_name}' already {'开启' if enable else '关闭'}, no action needed")
+            logger.info(f"'{control_name}' 已经是{'开启' if enable else '关闭'}状态，无需操作")
             return True
 
-        # Step 4: Press Space to toggle (Qt's TogglePattern.Toggle() is non-functional)
+        # 第4步：按空格键切换（Qt 的 TogglePattern.Toggle() 无效）
         self._press_key(win32con.VK_SPACE)
         time.sleep(0.5)
 
-        # Step 5: Verify by re-reading focus
+        # 第5步：重新读取焦点以验证
         new_ctrl = GetFocusedControl()
         if new_ctrl:
             new_p = new_ctrl.GetPattern(PatternId.TogglePattern)
@@ -657,24 +765,25 @@ class GroupManager(BasePage):
                 return False
 
         logger.info(f"'{control_name}' set to {'开启' if enable else '关闭'} successfully")
+        self._minimize_window()
         return True
 
     def set_do_not_disturb(self, group_name: str, enable: bool) -> bool:
         """
-        Enable or disable Do Not Disturb (消息免打扰) for a group.
+        启用或禁用群的消息免打扰。
 
         Args:
-            group_name: Name of the group
-            enable: True to enable, False to disable
+            group_name: 群名称
+            enable: True 启用，False 禁用
         """
         return self._set_toggle_in_detail_panel(group_name, '消息免打扰', enable)
 
     def set_pin_chat(self, group_name: str, enable: bool) -> bool:
         """
-        Enable or disable Pin Chat (置顶聊天) for a group.
+        启用或禁用群的置顶聊天。
 
         Args:
-            group_name: Name of the group
-            enable: True to pin, False to unpin
+            group_name: 群名称
+            enable: True 置顶，False 取消置顶
         """
         return self._set_toggle_in_detail_panel(group_name, '置顶聊天', enable)

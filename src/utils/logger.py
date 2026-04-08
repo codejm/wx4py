@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Logging utilities"""
+"""日志工具"""
 import json
 import logging
 import sys
@@ -9,19 +9,19 @@ from ..config import LOG_LEVEL, LOG_FORMAT, LOG_FILE, SEND_AUDIT_LOG_FILE
 
 
 def _ensure_parent_dir(file_path: str) -> None:
-    """Create log file parent directory when needed."""
+    """在需要时创建日志文件的父目录。"""
     Path(file_path).parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Get a configured logger instance.
+    获取已配置的日志器实例。
 
     Args:
-        name: Logger name (usually __name__)
+        name: 日志器名称（通常使用 __name__）
 
     Returns:
-        logging.Logger: Configured logger
+        logging.Logger: 已配置的日志器
     """
     logger = logging.getLogger(name)
 
@@ -41,7 +41,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def get_send_audit_logger() -> logging.Logger:
-    """Get dedicated structured logger for send audit records."""
+    """获取专用于发送审计记录的结构化日志器。"""
     logger = logging.getLogger("wx4py.send_audit")
 
     if not logger.handlers:
@@ -56,7 +56,7 @@ def get_send_audit_logger() -> logging.Logger:
 
 
 def log_send_audit(payload: dict) -> None:
-    """Write one structured send audit record as JSONL."""
+    """写入一条结构化发送审计记录（JSONL 格式）。"""
     get_send_audit_logger().info(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     )

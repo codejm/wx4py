@@ -1,4 +1,4 @@
 # -*- coding: utf-8 -*-
-"""Single source of truth for the package version."""
+"""包版本号的唯一来源。"""
 
 __version__ = "0.1.3"
