@@ -15,12 +15,12 @@
 </p>
 
 <p align="center">
-  <a href="https://www.bilibili.com/video/BV1ms9FByEF1/">
+  <a href="./docs/videos/wx4py-demo.mp4">
     <img src="docs/images/video_cover.png" alt="wx4py 视频演示" width="480">
   </a>
 </p>
 
-<p align="center">视频演示：点击上方封面查看 B 站视频 <code>BV1ms9FByEF1</code></p>
+<p align="center">视频演示：点击上方封面查看本地演示视频 <code>docs/videos/wx4py-demo.mp4</code></p>
 
 ---
 

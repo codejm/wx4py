@@ -175,14 +175,10 @@ with WeChatClient() as wx:
         </div>
         <div class="video-shell reveal">
           <div class="video-frame">
-            <iframe
-              src="https://player.bilibili.com/player.html?isOutside=true&aid=116335128484487&bvid=BV1ms9FByEF1&cid=37179099786&p=1"
-              title="wx4py Bilibili 视频演示"
-              loading="lazy"
-              scrolling="no"
-              frameborder="0"
-              allowfullscreen>
-            </iframe>
+            <video controls preload="metadata" poster="./images/video_cover.png">
+              <source src="./videos/wx4py-demo.mp4" type="video/mp4">
+              你的浏览器不支持视频播放，请直接下载演示视频查看。
+            </video>
           </div>
         </div>
       </div>

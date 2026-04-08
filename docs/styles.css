@@ -402,7 +402,8 @@ select {
     radial-gradient(circle at 12% 10%, rgba(121, 242, 177, 0.08), transparent 20%);
 }
 
-.video-frame iframe {
+.video-frame iframe,
+.video-frame video {
   position: absolute;
   inset: 0;
   width: 100%;
